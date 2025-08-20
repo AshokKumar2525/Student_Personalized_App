@@ -64,7 +64,10 @@ It combines smart recommendations, personalized alerts, and real-time integratio
 
 ## 👨‍💻 Contributors
 
-- **Ashok Kumar Malineni** (Lead Developer)  
+- **Ashok Kumar Malineni**
+- **Jyothi Reddy**
+- **S.Dev Deepak**
+- **C.S.V.Mahendra**
 ---
 
 ## 📌 Future Scope
