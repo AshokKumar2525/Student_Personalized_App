@@ -65,8 +65,6 @@ It combines smart recommendations, personalized alerts, and real-time integratio
 ## 👨‍💻 Contributors
 
 - **Ashok Kumar Malineni** (Lead Developer)  
-- Team contributions under **GSSoC’25 / Hackathon projects**  
-
 ---
 
 ## 📌 Future Scope
