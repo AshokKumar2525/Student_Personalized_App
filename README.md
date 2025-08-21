@@ -67,7 +67,7 @@ It combines smart recommendations, personalized alerts, and real-time integratio
 - **Ashok Kumar Malineni**
 - **Jyothi Reddy**
 - **S.Dev Deepak**
-- **C.S.V.Mahendra**
+- **C.V.S.Mahendra**
 ---
 
 ## 📌 Future Scope
