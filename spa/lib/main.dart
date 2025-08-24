@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'pages/tech_updates_page.dart';
+
 
 void main() {
   runApp(const MyApp());
@@ -266,7 +268,14 @@ class FeaturesList extends StatelessWidget {
             leading: Icon(Icons.star_rounded, color: Theme.of(context).colorScheme.secondary),
             title: Text(features[index]),
             trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () {},
+            onTap: () {
+              if (features[index] == "Tech Updates") {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const TechUpdatesPage()),
+                );
+              }
+            },
           ),
         );
       },
