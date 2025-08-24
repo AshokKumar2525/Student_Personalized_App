@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'pages/tech_updates_page.dart';
+import 'pages/career_connect/tech_updates_page.dart';
 
 
 void main() {
