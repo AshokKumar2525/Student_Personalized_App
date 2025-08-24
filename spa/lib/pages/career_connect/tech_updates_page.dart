@@ -1,11 +1,10 @@
-// tech_updates_page.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'domain_selection_page.dart';
-import 'important_updates_page.dart'; // Import the new page
+import 'important_updates_page.dart';
 
 class TechUpdatesPage extends StatefulWidget {
   const TechUpdatesPage({super.key});
@@ -49,11 +48,11 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
 
   Future<void> _fetchUpdates() async {
     final domainString = selectedDomains.join(',');
-    final url =
-        "https://da7d65efb080.ngrok-free.app/updates.php?domains=$domainString";
+    const url =
+        "https://da7d65efb080.ngrok-free.app/updates.php";
 
     try {
-      final response = await http.get(Uri.parse(url));
+      final response = await http.get(Uri.parse('$url?domains=$domainString'));
 
       if (!mounted) return;
 
@@ -66,7 +65,6 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
 
         final filteredData = data.where((update) {
           final uniqueId = update['id']?.toString() ?? jsonEncode(update);
-          // Check if the update is in either the dismissed or important lists
           return !dismissedUpdates.contains(uniqueId) && !importantUpdates.contains(jsonEncode(update));
         }).toList();
 
@@ -123,20 +121,18 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
 
     if (result == true) {
       final prefs = await SharedPreferences.getInstance();
-      if (!mounted) return;
-
       final dismissedUpdates = prefs.getStringList('dismissedUpdates') ?? [];
       final uniqueId = update['id']?.toString() ?? jsonEncode(update);
       if (!dismissedUpdates.contains(uniqueId)) {
         dismissedUpdates.add(uniqueId);
         await prefs.setStringList('dismissedUpdates', dismissedUpdates);
       }
-    }
 
-    if (!mounted) return;
-    setState(() {
-      updates.remove(update);
-    });
+      if (!mounted) return;
+      setState(() {
+        updates.remove(update);
+      });
+    }
   }
 
   Future<void> _launchURL(String url) async {
@@ -171,60 +167,98 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
           ),
         ],
       ),
-      body: updates.isEmpty
-          ? const Center(child: Text("No updates found"))
-          : ListView.builder(
-        itemCount: updates.length,
-        itemBuilder: (context, index) {
-          final update = updates[index];
-          return Dismissible(
-            key: Key(update['id']?.toString() ?? UniqueKey().toString()),
-            direction: DismissDirection.horizontal,
-            background: Container(
-              color: Colors.yellow,
-              alignment: Alignment.centerLeft,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: const Icon(Icons.star, color: Colors.white),
-            ),
-            secondaryBackground: Container(
-              color: Colors.red,
-              alignment: Alignment.centerRight,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: const Icon(Icons.delete, color: Colors.white),
-            ),
-            onDismissed: (direction) async {
-              if (direction == DismissDirection.endToStart) {
-                await _showDismissWarning(update);
-              } else if (direction == DismissDirection.startToEnd) {
-                await _saveImportantUpdate(update);
-
-                if (!mounted) return;
-                setState(() {
-                  updates.removeAt(index);
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text("${update['title']} saved as important!"),
-                  ),
-                );
-              }
-            },
-            child: Card(
-              margin: const EdgeInsets.all(8),
-              child: ListTile(
-                title: Text(update['title'] ?? "No Title"),
-                subtitle: Text(update['description'] ?? "No Description"),
-                trailing: const Icon(Icons.launch),
-                onTap: () {
-                  final url = update['link'];
-                  if (url != null) {
-                    _launchURL(url);
-                  }
-                },
+      body: RefreshIndicator(
+        onRefresh: _fetchUpdates,
+        child: updates.isEmpty
+            ? const Center(
+          child: Text("No updates found, pull down to refresh."),
+        )
+            : ListView.builder(
+          itemCount: updates.length,
+          itemBuilder: (context, index) {
+            final update = updates[index];
+            return Dismissible(
+              key: Key(update['id']?.toString() ?? UniqueKey().toString()),
+              direction: DismissDirection.horizontal,
+              background: Container(
+                color: Colors.yellow,
+                alignment: Alignment.centerLeft,
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: const Icon(Icons.star, color: Colors.white),
               ),
-            ),
-          );
-        },
+              secondaryBackground: Container(
+                color: Colors.red,
+                alignment: Alignment.centerRight,
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: const Icon(Icons.delete, color: Colors.white),
+              ),
+              onDismissed: (direction) async {
+                if (direction == DismissDirection.endToStart) {
+                  await _showDismissWarning(update);
+                } else if (direction == DismissDirection.startToEnd) {
+                  await _saveImportantUpdate(update);
+
+                  if (!mounted) return;
+                  setState(() {
+                    updates.removeAt(index);
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text("${update['title']} saved as important!"),
+                    ),
+                  );
+                }
+              },
+              child: Card(
+                margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                child: ExpansionTile(
+                  title: Text(update['title'] ?? "No Title"),
+                  subtitle: Text(
+                    update['description'] ?? "No Description",
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  children: <Widget>[
+                    const Divider(height: 1),
+                    Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Expiring Date: ${update['expiring_date'] ?? "N/A"}',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            update['description'] ?? "No Description",
+                          ),
+                          const SizedBox(height: 8),
+                          if (update['link'] != null && update['link'].isNotEmpty)
+                            GestureDetector(
+                              onTap: () {
+                                final url = update['link'];
+                                if (url != null) {
+                                  _launchURL(url);
+                                }
+                              },
+                              child: Text(
+                                'Learn More',
+                                style: TextStyle(
+                                  color: Theme.of(context).primaryColor,
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
       ),
     );
   }
