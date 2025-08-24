@@ -65,7 +65,7 @@ It combines smart recommendations, personalized alerts, and real-time integratio
 ## 👨‍💻 Contributors
 
 - **Ashok Kumar Malineni**
-- **Jyothi Reddy**
+- **Jyothi Reddy Nangamangalam**
 - **S.Dev Deepak**
 - **C.S.V.Mahendra**
 ---

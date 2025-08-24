@@ -15,7 +15,7 @@ class TechUpdatesPage extends StatefulWidget {
 
 class _TechUpdatesPageState extends State<TechUpdatesPage> {
   List<String> selectedDomains = [];
-  List<dynamic> updates = [];
+  List<Map<String, dynamic>> updates = [];
   bool isLoading = true;
 
   @override
@@ -30,6 +30,7 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
 
     if (savedDomains == null || savedDomains.isEmpty) {
       if (!mounted) return;
+      // Using Future.microtask to navigate after build
       Future.microtask(() {
         if (!mounted) return;
         Navigator.pushReplacement(
@@ -47,34 +48,57 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
   }
 
   Future<void> _fetchUpdates() async {
+    setState(() {
+      isLoading = true;
+    });
+
     final domainString = selectedDomains.join(',');
-    const url =
-        "https://da7d65efb080.ngrok-free.app/updates.php";
+    const url = "https://da7d65efb080.ngrok-free.app/get_internships.php";
 
     try {
-      final response = await http.get(Uri.parse('$url?domains=$domainString'));
+      final response = await http.get(Uri.parse('$url?domain=$domainString'));
 
       if (!mounted) return;
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 && response.body.isNotEmpty) {
         final data = jsonDecode(response.body);
+
+        if (data is! List) {
+          throw const FormatException("Invalid data format from API, expected a list.");
+        }
 
         final prefs = await SharedPreferences.getInstance();
         final dismissedUpdates = prefs.getStringList('dismissedUpdates') ?? [];
         final importantUpdates = prefs.getStringList('importantUpdates') ?? [];
 
-        final filteredData = data.where((update) {
-          final uniqueId = update['id']?.toString() ?? jsonEncode(update);
-          return !dismissedUpdates.contains(uniqueId) && !importantUpdates.contains(jsonEncode(update));
-        }).toList();
+        List<Map<String, dynamic>> tempUpdates = [];
+        for (var item in data) {
+          if (item is Map<String, dynamic>) {
+            final mappedItem = {
+              'id': item['id']?.toString() ?? '',
+              'title': item['title'] ?? 'No Title',
+              'description': item['description'] ?? 'No Description',
+              'company': item['company'] ?? 'N/A',
+              'location': item['location'] ?? 'N/A',
+              'expiring_date': item['expiry_date'] ?? "N/A",
+              'link': item['url'] ?? '',
+            };
+            final uniqueId = mappedItem['id']?.toString() ?? jsonEncode(mappedItem);
+
+            // Filter based on dismissed and important lists
+            if (!dismissedUpdates.contains(uniqueId) && !importantUpdates.contains(jsonEncode(mappedItem))) {
+              tempUpdates.add(mappedItem);
+            }
+          }
+        }
 
         if (!mounted) return;
         setState(() {
-          updates = filteredData;
+          updates = tempUpdates;
           isLoading = false;
         });
       } else {
-        throw Exception("Failed to load updates");
+        throw Exception("Failed to load updates. Status code: ${response.statusCode}");
       }
     } catch (e) {
       if (!mounted) return;
@@ -85,19 +109,19 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
     }
   }
 
-  Future<void> _saveImportantUpdate(dynamic update) async {
+  Future<void> _saveImportantUpdate(Map<String, dynamic> update) async {
     final prefs = await SharedPreferences.getInstance();
-    final importantUpdates = prefs.getStringList('importantUpdates') ?? [];
+    final jsonUpdate = jsonEncode(update);
 
-    final updateString = jsonEncode(update);
-    if (!importantUpdates.contains(updateString)) {
-      importantUpdates.add(updateString);
+    final importantUpdates = prefs.getStringList('importantUpdates') ?? [];
+    if (!importantUpdates.contains(jsonUpdate)) {
+      importantUpdates.add(jsonUpdate);
       await prefs.setStringList('importantUpdates', importantUpdates);
     }
   }
 
-  Future<void> _showDismissWarning(dynamic update) async {
-    final result = await showDialog<bool>(
+  Future<bool?> _showDismissWarning(Map<String, dynamic> update) async {
+    return showDialog<bool>(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
@@ -116,23 +140,6 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
         );
       },
     );
-
-    if (!mounted) return;
-
-    if (result == true) {
-      final prefs = await SharedPreferences.getInstance();
-      final dismissedUpdates = prefs.getStringList('dismissedUpdates') ?? [];
-      final uniqueId = update['id']?.toString() ?? jsonEncode(update);
-      if (!dismissedUpdates.contains(uniqueId)) {
-        dismissedUpdates.add(uniqueId);
-        await prefs.setStringList('dismissedUpdates', dismissedUpdates);
-      }
-
-      if (!mounted) return;
-      setState(() {
-        updates.remove(update);
-      });
-    }
   }
 
   Future<void> _launchURL(String url) async {
@@ -157,6 +164,18 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
         title: const Text("Tech Updates"),
         actions: [
           IconButton(
+            icon: const Icon(Icons.edit),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const DomainSelectionPage()),
+              ).then((_) {
+                _checkDomains();
+              });
+            },
+            tooltip: 'Change Domains',
+          ),
+          IconButton(
             icon: const Icon(Icons.star, color: Colors.yellow),
             onPressed: () {
               Navigator.push(
@@ -164,6 +183,7 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
                 MaterialPageRoute(builder: (_) => const ImportantUpdatesPage()),
               );
             },
+            tooltip: 'Important Updates',
           ),
         ],
       ),
@@ -192,31 +212,47 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: const Icon(Icons.delete, color: Colors.white),
               ),
-              onDismissed: (direction) async {
+              confirmDismiss: (direction) async {
                 if (direction == DismissDirection.endToStart) {
-                  await _showDismissWarning(update);
+                  final result = await _showDismissWarning(update);
+                  if (result == true) {
+                    final prefs = await SharedPreferences.getInstance();
+                    final dismissedUpdates = prefs.getStringList('dismissedUpdates') ?? [];
+                    final uniqueId = update['id']?.toString() ?? jsonEncode(update);
+                    if (!dismissedUpdates.contains(uniqueId)) {
+                      dismissedUpdates.add(uniqueId);
+                      await prefs.setStringList('dismissedUpdates', dismissedUpdates);
+                    }
+                    if (mounted) {
+                      setState(() {
+                        updates.removeAt(index);
+                      });
+                    }
+                    return true;
+                  }
+                  return false;
                 } else if (direction == DismissDirection.startToEnd) {
                   await _saveImportantUpdate(update);
-
-                  if (!mounted) return;
-                  setState(() {
-                    updates.removeAt(index);
-                  });
+                  if (mounted) {
+                    setState(() {
+                      updates.removeAt(index);
+                    });
+                  }
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text("${update['title']} saved as important!"),
                     ),
                   );
+                  return true;
                 }
+                return false;
               },
               child: Card(
                 margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 child: ExpansionTile(
                   title: Text(update['title'] ?? "No Title"),
                   subtitle: Text(
-                    update['description'] ?? "No Description",
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                    "Company: ${update['company'] ?? 'N/A'} | Location: ${update['location'] ?? 'N/A'}",
                   ),
                   children: <Widget>[
                     const Divider(height: 1),
