@@ -1,6 +1,11 @@
+// tech_updates_page.dart
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'domain_selection_page.dart';  // 👈 important
+import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
+import 'domain_selection_page.dart';
+import 'important_updates_page.dart'; // Import the new page
 
 class TechUpdatesPage extends StatefulWidget {
   const TechUpdatesPage({super.key});
@@ -11,6 +16,8 @@ class TechUpdatesPage extends StatefulWidget {
 
 class _TechUpdatesPageState extends State<TechUpdatesPage> {
   List<String> selectedDomains = [];
+  List<dynamic> updates = [];
+  bool isLoading = true;
 
   @override
   void initState() {
@@ -23,7 +30,7 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
     final savedDomains = prefs.getStringList('selectedDomains');
 
     if (savedDomains == null || savedDomains.isEmpty) {
-      if (!mounted) return; // ✅ safety before using context
+      if (!mounted) return;
       Future.microtask(() {
         if (!mounted) return;
         Navigator.pushReplacement(
@@ -32,29 +39,192 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
         );
       });
     } else {
-      if (!mounted) return; // ✅ safety before setState
+      if (!mounted) return;
       setState(() {
         selectedDomains = savedDomains;
       });
+      _fetchUpdates();
     }
   }
 
+  Future<void> _fetchUpdates() async {
+    final domainString = selectedDomains.join(',');
+    final url =
+        "https://da7d65efb080.ngrok-free.app/updates.php?domains=$domainString";
+
+    try {
+      final response = await http.get(Uri.parse(url));
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+
+        final prefs = await SharedPreferences.getInstance();
+        final dismissedUpdates = prefs.getStringList('dismissedUpdates') ?? [];
+        final importantUpdates = prefs.getStringList('importantUpdates') ?? [];
+
+        final filteredData = data.where((update) {
+          final uniqueId = update['id']?.toString() ?? jsonEncode(update);
+          // Check if the update is in either the dismissed or important lists
+          return !dismissedUpdates.contains(uniqueId) && !importantUpdates.contains(jsonEncode(update));
+        }).toList();
+
+        if (!mounted) return;
+        setState(() {
+          updates = filteredData;
+          isLoading = false;
+        });
+      } else {
+        throw Exception("Failed to load updates");
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        isLoading = false;
+      });
+      debugPrint("Error fetching updates: $e");
+    }
+  }
+
+  Future<void> _saveImportantUpdate(dynamic update) async {
+    final prefs = await SharedPreferences.getInstance();
+    final importantUpdates = prefs.getStringList('importantUpdates') ?? [];
+
+    final updateString = jsonEncode(update);
+    if (!importantUpdates.contains(updateString)) {
+      importantUpdates.add(updateString);
+      await prefs.setStringList('importantUpdates', importantUpdates);
+    }
+  }
+
+  Future<void> _showDismissWarning(dynamic update) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text("Dismiss Update"),
+          content: const Text("This update will not appear again. Are you sure?"),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text("Cancel"),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text("Dismiss"),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted) return;
+
+    if (result == true) {
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
+
+      final dismissedUpdates = prefs.getStringList('dismissedUpdates') ?? [];
+      final uniqueId = update['id']?.toString() ?? jsonEncode(update);
+      if (!dismissedUpdates.contains(uniqueId)) {
+        dismissedUpdates.add(uniqueId);
+        await prefs.setStringList('dismissedUpdates', dismissedUpdates);
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      updates.remove(update);
+    });
+  }
+
+  Future<void> _launchURL(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    } else {
+      debugPrint('Could not launch $url');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (selectedDomains.isEmpty) {
+    if (isLoading) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
       );
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text("Tech Updates")),
-      body: ListView(
-        children: [
-          for (var domain in selectedDomains)
-            ListTile(title: Text("Updates for $domain")),
+      appBar: AppBar(
+        title: const Text("Tech Updates"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.star, color: Colors.yellow),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ImportantUpdatesPage()),
+              );
+            },
+          ),
         ],
+      ),
+      body: updates.isEmpty
+          ? const Center(child: Text("No updates found"))
+          : ListView.builder(
+        itemCount: updates.length,
+        itemBuilder: (context, index) {
+          final update = updates[index];
+          return Dismissible(
+            key: Key(update['id']?.toString() ?? UniqueKey().toString()),
+            direction: DismissDirection.horizontal,
+            background: Container(
+              color: Colors.yellow,
+              alignment: Alignment.centerLeft,
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: const Icon(Icons.star, color: Colors.white),
+            ),
+            secondaryBackground: Container(
+              color: Colors.red,
+              alignment: Alignment.centerRight,
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: const Icon(Icons.delete, color: Colors.white),
+            ),
+            onDismissed: (direction) async {
+              if (direction == DismissDirection.endToStart) {
+                await _showDismissWarning(update);
+              } else if (direction == DismissDirection.startToEnd) {
+                await _saveImportantUpdate(update);
+
+                if (!mounted) return;
+                setState(() {
+                  updates.removeAt(index);
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text("${update['title']} saved as important!"),
+                  ),
+                );
+              }
+            },
+            child: Card(
+              margin: const EdgeInsets.all(8),
+              child: ListTile(
+                title: Text(update['title'] ?? "No Title"),
+                subtitle: Text(update['description'] ?? "No Description"),
+                trailing: const Icon(Icons.launch),
+                onTap: () {
+                  final url = update['link'];
+                  if (url != null) {
+                    _launchURL(url);
+                  }
+                },
+              ),
+            ),
+          );
+        },
       ),
     );
   }
