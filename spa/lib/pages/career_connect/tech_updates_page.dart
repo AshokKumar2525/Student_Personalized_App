@@ -53,7 +53,7 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
     });
 
     final domainString = selectedDomains.join(',');
-    const url = "https://da7d65efb080.ngrok-free.app/get_internships.php";
+    const url = "https://3e1e59f28b6d.ngrok-free.app/get_internships.php";
 
     try {
       final response = await http.get(Uri.parse('$url?domain=$domainString'));
