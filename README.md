@@ -32,7 +32,8 @@ It combines smart recommendations, personalized alerts, and real-time integratio
   - Google Fit API (for fitness data)  
   - News API (for tech updates)  
   - Scholarship databases  
-  - Currency/Finance API (for expense tracking & analytics)  
+  - Currency/Finance API (for expense tracking & analytics)
+- **Auth:** Google Firebase
 
 ---
 
@@ -58,8 +59,61 @@ It combines smart recommendations, personalized alerts, and real-time integratio
 - 💰 **Finance Tab** – expense tracker, budget goals, charts  
 - 📰 **Tech Tab** – latest news  
 - 📚 **Learning Tab** – English + topic suggestions  
-- 🎓 **Scholarships Tab** – opportunities feed  
+- 🎓 **Scholarships Tab** – opportunities feed   
 
+---
+
+## 🏗️ Installation & Setup
+
+### 1️⃣ Prerequisites
+Before running the app, make sure you have installed:
+
+- Flutter SDK ≥ 3.9 ([Flutter installation guide](https://docs.flutter.dev/get-started/install))  
+- Android Studio / VS Code with Flutter plugin  
+- Node.js ≥ 18.x  
+- Git  
+- Firebase CLI (optional, for adding Firebase services locally)  
+
+---
+
+### 2️⃣ Clone the Repository
+```bash
+git clone https://github.com/<your username>/Student_Personalized_App.git
+cd Student_Personalized_App
+```
+### 3️⃣ Backend Setup
+```bash
+cd backend
+npm install
+npm start
+```
+### 4️⃣ Flutter Frontend Setup
+```bash
+cd spa
+flutter pub get
+```
+
+### 5️⃣ Firebase Setup
+```bash
+dart pub global activate flutterfire_cli
+flutterfire configure
+
+# next run
+keytool -list -v -alias androiddebugkey -keystore %USERPROFILE%\.android\debug.keystore
+# if it asks password enter ==> android
+# For Google Sign-In, register your debug SHA-1 key in Firebase (Android) to avoid auth errors:  
+```
+### 6️⃣ Run
+```bash
+# Before running check whether you have all dependencies
+flutter doctor
+
+# List available devices:
+flutter devices
+
+# Run the app:
+flutter run -d <device_id>
+```
 ---
 
 ## 👨‍💻 Contributors
@@ -75,27 +129,8 @@ It combines smart recommendations, personalized alerts, and real-time integratio
 - Group study rooms with AI support  
 - Mentor–student chat integration  
 - Voice-based assistant mode  
-- Smart finance suggestions based on spending behavior  
+- Smart finance suggestions based on spending behavior
 
----
-
-## 🏗️ Installation & Setup
-
-```bash
-# Clone repo
-git clone https://github.com/AshokKumar2525/Student_Personalized_App.git
-
-# Install dependencies
-cd student-personalized-app
-npm install   # for backend
-flutter pub get   # for frontend (if using Flutter)
-
-# Run backend server
-npm start
-
-# Run Flutter app on emulator
-flutter run
-```
-
+  
 ## 📜 License
 This project is licensed under the MIT License.
