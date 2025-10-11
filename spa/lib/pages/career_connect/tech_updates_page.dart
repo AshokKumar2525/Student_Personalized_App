@@ -1,11 +1,10 @@
-// tech_updates_page.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'domain_selection_page.dart';
-import 'important_updates_page.dart'; // Import the new page
+import 'important_updates_page.dart';
 
 class TechUpdatesPage extends StatefulWidget {
   const TechUpdatesPage({super.key});
@@ -16,7 +15,7 @@ class TechUpdatesPage extends StatefulWidget {
 
 class _TechUpdatesPageState extends State<TechUpdatesPage> {
   List<String> selectedDomains = [];
-  List<dynamic> updates = [];
+  List<Map<String, dynamic>> updates = [];
   bool isLoading = true;
 
   @override
@@ -31,6 +30,7 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
 
     if (savedDomains == null || savedDomains.isEmpty) {
       if (!mounted) return;
+      // Using Future.microtask to navigate after build
       Future.microtask(() {
         if (!mounted) return;
         Navigator.pushReplacement(
@@ -48,35 +48,57 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
   }
 
   Future<void> _fetchUpdates() async {
+    setState(() {
+      isLoading = true;
+    });
+
     final domainString = selectedDomains.join(',');
-    final url =
-        "https://da7d65efb080.ngrok-free.app/updates.php?domains=$domainString";
+    const url = "https://e3d509b3e2b3.ngrok-free.app/get_internships.php";
 
     try {
-      final response = await http.get(Uri.parse(url));
+      final response = await http.get(Uri.parse('$url?domain=$domainString'));
 
       if (!mounted) return;
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 && response.body.isNotEmpty) {
         final data = jsonDecode(response.body);
+
+        if (data is! List) {
+          throw const FormatException("Invalid data format from API, expected a list.");
+        }
 
         final prefs = await SharedPreferences.getInstance();
         final dismissedUpdates = prefs.getStringList('dismissedUpdates') ?? [];
         final importantUpdates = prefs.getStringList('importantUpdates') ?? [];
 
-        final filteredData = data.where((update) {
-          final uniqueId = update['id']?.toString() ?? jsonEncode(update);
-          // Check if the update is in either the dismissed or important lists
-          return !dismissedUpdates.contains(uniqueId) && !importantUpdates.contains(jsonEncode(update));
-        }).toList();
+        List<Map<String, dynamic>> tempUpdates = [];
+        for (var item in data) {
+          if (item is Map<String, dynamic>) {
+            final mappedItem = {
+              'id': item['id']?.toString() ?? '',
+              'title': item['title'] ?? 'No Title',
+              'description': item['description'] ?? 'No Description',
+              'company': item['company'] ?? 'N/A',
+              'location': item['location'] ?? 'N/A',
+              'expiring_date': item['expiry_date'] ?? "N/A",
+              'link': item['url'] ?? '',
+            };
+            final uniqueId = mappedItem['id']?.toString() ?? jsonEncode(mappedItem);
+
+            // Filter based on dismissed and important lists
+            if (!dismissedUpdates.contains(uniqueId) && !importantUpdates.contains(jsonEncode(mappedItem))) {
+              tempUpdates.add(mappedItem);
+            }
+          }
+        }
 
         if (!mounted) return;
         setState(() {
-          updates = filteredData;
+          updates = tempUpdates;
           isLoading = false;
         });
       } else {
-        throw Exception("Failed to load updates");
+        throw Exception("Failed to load updates. Status code: ${response.statusCode}");
       }
     } catch (e) {
       if (!mounted) return;
@@ -87,19 +109,19 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
     }
   }
 
-  Future<void> _saveImportantUpdate(dynamic update) async {
+  Future<void> _saveImportantUpdate(Map<String, dynamic> update) async {
     final prefs = await SharedPreferences.getInstance();
-    final importantUpdates = prefs.getStringList('importantUpdates') ?? [];
+    final jsonUpdate = jsonEncode(update);
 
-    final updateString = jsonEncode(update);
-    if (!importantUpdates.contains(updateString)) {
-      importantUpdates.add(updateString);
+    final importantUpdates = prefs.getStringList('importantUpdates') ?? [];
+    if (!importantUpdates.contains(jsonUpdate)) {
+      importantUpdates.add(jsonUpdate);
       await prefs.setStringList('importantUpdates', importantUpdates);
     }
   }
 
-  Future<void> _showDismissWarning(dynamic update) async {
-    final result = await showDialog<bool>(
+  Future<bool?> _showDismissWarning(Map<String, dynamic> update) async {
+    return showDialog<bool>(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
@@ -118,25 +140,6 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
         );
       },
     );
-
-    if (!mounted) return;
-
-    if (result == true) {
-      final prefs = await SharedPreferences.getInstance();
-      if (!mounted) return;
-
-      final dismissedUpdates = prefs.getStringList('dismissedUpdates') ?? [];
-      final uniqueId = update['id']?.toString() ?? jsonEncode(update);
-      if (!dismissedUpdates.contains(uniqueId)) {
-        dismissedUpdates.add(uniqueId);
-        await prefs.setStringList('dismissedUpdates', dismissedUpdates);
-      }
-    }
-
-    if (!mounted) return;
-    setState(() {
-      updates.remove(update);
-    });
   }
 
   Future<void> _launchURL(String url) async {
@@ -161,6 +164,18 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
         title: const Text("Tech Updates"),
         actions: [
           IconButton(
+            icon: const Icon(Icons.edit),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const DomainSelectionPage()),
+              ).then((_) {
+                _checkDomains();
+              });
+            },
+            tooltip: 'Change Domains',
+          ),
+          IconButton(
             icon: const Icon(Icons.star, color: Colors.yellow),
             onPressed: () {
               Navigator.push(
@@ -168,63 +183,118 @@ class _TechUpdatesPageState extends State<TechUpdatesPage> {
                 MaterialPageRoute(builder: (_) => const ImportantUpdatesPage()),
               );
             },
+            tooltip: 'Important Updates',
           ),
         ],
       ),
-      body: updates.isEmpty
-          ? const Center(child: Text("No updates found"))
-          : ListView.builder(
-        itemCount: updates.length,
-        itemBuilder: (context, index) {
-          final update = updates[index];
-          return Dismissible(
-            key: Key(update['id']?.toString() ?? UniqueKey().toString()),
-            direction: DismissDirection.horizontal,
-            background: Container(
-              color: Colors.yellow,
-              alignment: Alignment.centerLeft,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: const Icon(Icons.star, color: Colors.white),
-            ),
-            secondaryBackground: Container(
-              color: Colors.red,
-              alignment: Alignment.centerRight,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: const Icon(Icons.delete, color: Colors.white),
-            ),
-            onDismissed: (direction) async {
-              if (direction == DismissDirection.endToStart) {
-                await _showDismissWarning(update);
-              } else if (direction == DismissDirection.startToEnd) {
-                await _saveImportantUpdate(update);
-
-                if (!mounted) return;
-                setState(() {
-                  updates.removeAt(index);
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text("${update['title']} saved as important!"),
-                  ),
-                );
-              }
-            },
-            child: Card(
-              margin: const EdgeInsets.all(8),
-              child: ListTile(
-                title: Text(update['title'] ?? "No Title"),
-                subtitle: Text(update['description'] ?? "No Description"),
-                trailing: const Icon(Icons.launch),
-                onTap: () {
-                  final url = update['link'];
-                  if (url != null) {
-                    _launchURL(url);
-                  }
-                },
+      body: RefreshIndicator(
+        onRefresh: _fetchUpdates,
+        child: updates.isEmpty
+            ? const Center(
+          child: Text("No updates found, pull down to refresh."),
+        )
+            : ListView.builder(
+          itemCount: updates.length,
+          itemBuilder: (context, index) {
+            final update = updates[index];
+            return Dismissible(
+              key: Key(update['id']?.toString() ?? UniqueKey().toString()),
+              direction: DismissDirection.horizontal,
+              background: Container(
+                color: Colors.yellow,
+                alignment: Alignment.centerLeft,
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: const Icon(Icons.star, color: Colors.white),
               ),
-            ),
-          );
-        },
+              secondaryBackground: Container(
+                color: Colors.red,
+                alignment: Alignment.centerRight,
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: const Icon(Icons.delete, color: Colors.white),
+              ),
+              confirmDismiss: (direction) async {
+                if (direction == DismissDirection.endToStart) {
+                  final result = await _showDismissWarning(update);
+                  if (result == true) {
+                    final prefs = await SharedPreferences.getInstance();
+                    final dismissedUpdates = prefs.getStringList('dismissedUpdates') ?? [];
+                    final uniqueId = update['id']?.toString() ?? jsonEncode(update);
+                    if (!dismissedUpdates.contains(uniqueId)) {
+                      dismissedUpdates.add(uniqueId);
+                      await prefs.setStringList('dismissedUpdates', dismissedUpdates);
+                    }
+                    if (mounted) {
+                      setState(() {
+                        updates.removeAt(index);
+                      });
+                    }
+                    return true;
+                  }
+                  return false;
+                } else if (direction == DismissDirection.startToEnd) {
+                  await _saveImportantUpdate(update);
+                  if (mounted) {
+                    setState(() {
+                      updates.removeAt(index);
+                    });
+                  }
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text("${update['title']} saved as important!"),
+                    ),
+                  );
+                  return true;
+                }
+                return false;
+              },
+              child: Card(
+                margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                child: ExpansionTile(
+                  title: Text(update['title'] ?? "No Title"),
+                  subtitle: Text(
+                    "Company: ${update['company'] ?? 'N/A'} | Location: ${update['location'] ?? 'N/A'}",
+                  ),
+                  children: <Widget>[
+                    const Divider(height: 1),
+                    Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Expiring Date: ${update['expiring_date'] ?? "N/A"}',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            update['description'] ?? "No Description",
+                          ),
+                          const SizedBox(height: 8),
+                          if (update['link'] != null && update['link'].isNotEmpty)
+                            GestureDetector(
+                              onTap: () {
+                                final url = update['link'];
+                                if (url != null) {
+                                  _launchURL(url);
+                                }
+                              },
+                              child: Text(
+                                'Learn More',
+                                style: TextStyle(
+                                  color: Theme.of(context).primaryColor,
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
       ),
     );
   }

@@ -12,7 +12,7 @@ class ImportantUpdatesPage extends StatefulWidget {
 }
 
 class _ImportantUpdatesPageState extends State<ImportantUpdatesPage> {
-  List<dynamic> importantUpdates = [];
+  List<Map<String, dynamic>> importantUpdates = [];
   bool isLoading = true;
 
   @override
@@ -25,9 +25,26 @@ class _ImportantUpdatesPageState extends State<ImportantUpdatesPage> {
     final prefs = await SharedPreferences.getInstance();
     final impUpdatesString = prefs.getStringList('importantUpdates') ?? [];
 
+    List<Map<String, dynamic>> tempUpdates = [];
+    for (var jsonString in impUpdatesString) {
+      try {
+        final decoded = jsonDecode(jsonString);
+        // We expect a Map, so we explicitly check for the type.
+        if (decoded is Map<String, dynamic>) {
+          tempUpdates.add(decoded);
+        } else {
+          // Log an error if the data is not in the expected format.
+          debugPrint('Skipped malformed data from SharedPreferences: $decoded');
+        }
+      } catch (e) {
+        // Handle parsing errors gracefully.
+        debugPrint('Failed to decode JSON from SharedPreferences: $jsonString');
+      }
+    }
+
     if (!mounted) return;
     setState(() {
-      importantUpdates = impUpdatesString.map((e) => jsonDecode(e)).toList();
+      importantUpdates = tempUpdates;
       isLoading = false;
     });
   }
@@ -41,7 +58,7 @@ class _ImportantUpdatesPageState extends State<ImportantUpdatesPage> {
     }
   }
 
-  Future<void> _removeImportantUpdate(dynamic update) async {
+  Future<void> _removeImportantUpdate(Map<String, dynamic> update) async {
     final prefs = await SharedPreferences.getInstance();
     final importantUpdatesList = prefs.getStringList('importantUpdates') ?? [];
 
@@ -51,7 +68,7 @@ class _ImportantUpdatesPageState extends State<ImportantUpdatesPage> {
     await prefs.setStringList('importantUpdates', importantUpdatesList);
   }
 
-  Future<void> _showDeleteWarning(dynamic update) async {
+  Future<void> _showDeleteWarning(Map<String, dynamic> update) async {
     final result = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) {
@@ -111,8 +128,10 @@ class _ImportantUpdatesPageState extends State<ImportantUpdatesPage> {
         itemCount: importantUpdates.length,
         itemBuilder: (context, index) {
           final update = importantUpdates[index];
+          // Use a null-aware operator for 'id' to provide a fallback key
+          final key = Key(update['id']?.toString() ?? UniqueKey().toString());
           return Dismissible(
-            key: Key(update['id']?.toString() ?? UniqueKey().toString()),
+            key: key,
             direction: DismissDirection.horizontal,
             background: Container(
               color: Colors.grey,
@@ -135,7 +154,7 @@ class _ImportantUpdatesPageState extends State<ImportantUpdatesPage> {
                   importantUpdates.removeAt(index);
                 });
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text("${update['title']} is no longer important.")),
+                  SnackBar(content: Text("${update['title'] ?? 'This update'} is no longer important.")),
                 );
               } else if (direction == DismissDirection.endToStart) {
                 // Swiped left to delete
@@ -167,17 +186,6 @@ class _ImportantUpdatesPageState extends State<ImportantUpdatesPage> {
                           update['description'] ?? "No Description",
                         ),
                         const SizedBox(height: 8),
-                        if (update['link'] != null && update['link'].isNotEmpty)
-                          GestureDetector(
-                            onTap: () => _launchURL(update['link']),
-                            child: Text(
-                              'Learn More',
-                              style: TextStyle(
-                                color: Theme.of(context).primaryColor,
-                                decoration: TextDecoration.underline,
-                              ),
-                            ),
-                          ),
                       ],
                     ),
                   ),

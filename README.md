@@ -119,7 +119,7 @@ flutter run -d <device_id>
 ## 👨‍💻 Contributors
 
 - **Ashok Kumar Malineni**
-- **Jyothi Reddy**
+- **Jyothi Reddy Nangamangalam**
 - **S.Dev Deepak**
 - **C.S.V.Mahendra**
 ---
