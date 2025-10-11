@@ -1,13 +1,58 @@
 import 'package:flutter/material.dart';
+import 'LoginPage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'pages/career_connect/tech_updates_page.dart';
+import 'firebase_options.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
-
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  bool _loading = true;
+  String? _userName;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkLoginStatus();
+  }
+
+  Future<void> _checkLoginStatus() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    final bool isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (isLoggedIn && user != null) {
+      _userName = user.displayName ?? "User";
+    }
+
+    setState(() {
+      _loading = false;
+    });
+  }
+
+  Future<void> _onLoginSuccess(String userName) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isLoggedIn', true);
+    setState(() {
+      _userName = userName;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -16,21 +61,24 @@ class MyApp extends StatelessWidget {
       title: 'Student Hub',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1E88E5), // A vibrant blue
+          seedColor: const Color(0xFF1E88E5),
           brightness: Brightness.light,
         ),
         useMaterial3: true,
         fontFamily: 'Roboto',
       ),
-      home: const HomePage(),
+      home: _loading
+          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+          : (_userName != null
+              ? HomePage(userName: _userName!)
+              : LoginPage(onLoginSuccess: (userName) => _onLoginSuccess(userName))),
     );
   }
 }
 
 class HomePage extends StatelessWidget {
-  const HomePage({super.key});
-
-  final String userName = "Alex"; // Placeholder for the user's name
+  final String userName;
+  const HomePage({super.key, required this.userName});
 
   final List<Map<String, dynamic>> highlights = const [
     {
@@ -66,7 +114,38 @@ class HomePage extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        toolbarHeight: 0, // Hides the AppBar, using a custom header below
+        toolbarHeight: 60,
+        actions: [
+          PopupMenuButton<String>(
+            icon: const CircleAvatar(
+              child: Icon(Icons.person_rounded),
+            ),
+            onSelected: (value) async {
+              if (value == "Logout") {
+                // Sign out Google and Firebase
+                final googleSignIn = GoogleSignIn();
+                await googleSignIn.signOut();
+                await FirebaseAuth.instance.signOut();
+                SharedPreferences prefs = await SharedPreferences.getInstance();
+                await prefs.setBool('isLoggedIn', false);
+
+                // Restart app to show login page
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const MyApp()),
+                  (route) => false,
+                );
+              }
+            },
+            itemBuilder: (BuildContext context) {
+              return ['Logout'].map((String choice) {
+                return PopupMenuItem<String>(
+                  value: choice,
+                  child: Text(choice),
+                );
+              }).toList();
+            },
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         child: Column(
