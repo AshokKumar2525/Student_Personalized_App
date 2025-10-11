@@ -8,11 +8,18 @@ class AvatarUtils {
       return '';
     }
     
+    // If it's already a full URL (from Google/Firebase), return as is
     if (relativeUrl.startsWith('http')) {
       return relativeUrl;
     }
     
-    return '$baseUrl$relativeUrl';
+    // If it's a relative path from backend, construct full URL
+    // Handle both formats: "/static/uploads/avatars/filename" and "static/uploads/avatars/filename"
+    if (relativeUrl.startsWith('/')) {
+      return '$baseUrl$relativeUrl';
+    } else {
+      return '$baseUrl/$relativeUrl';
+    }
   }
 
   static String getInitials(String name) {
@@ -54,9 +61,10 @@ class AvatarUtils {
         radius: size / 2,
         backgroundImage: NetworkImage(fullUrl),
         onBackgroundImageError: (exception, stackTrace) {
-          // Log error but don't return widget
+          print('Failed to load avatar image: $exception');
+          // If network image fails, it will fall back to the child (initials)
         },
-        child: fullUrl.isNotEmpty ? null : _buildInitialsText(name, size),
+        child: _buildInitialsText(name, size),
       );
     } else {
       return _buildInitialsAvatar(name, size);

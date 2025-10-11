@@ -45,6 +45,7 @@ class _MyAppState extends State<MyApp> {
     if (isLoggedIn && user != null) {
       _userName = prefs.getString('displayName') ?? _cleanUserName(user.displayName ?? "User");
       _avatarUrl = prefs.getString('avatarUrl') ?? user.photoURL;
+      print('Loaded avatar URL: $_avatarUrl'); // Debug print
     }
 
     setState(() {
@@ -64,6 +65,7 @@ class _MyAppState extends State<MyApp> {
     
     if (avatarUrl != null) {
       await prefs.setString('avatarUrl', avatarUrl);
+      print('Saved avatar URL on login: $avatarUrl'); // Debug print
     }
     
     setState(() {
@@ -95,6 +97,7 @@ class _MyAppState extends State<MyApp> {
       
       if (newAvatarUrl != null) {
         await prefs.setString('avatarUrl', newAvatarUrl);
+        print('Saved new avatar URL: $newAvatarUrl'); // Debug print
       }
       
       setState(() {
@@ -157,6 +160,7 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _currentUserName = widget.userName;
     _currentAvatarUrl = widget.avatarUrl;
+    print('HomePage initialized with avatar URL: $_currentAvatarUrl'); // Debug print
   }
 
   Future<void> _logout(BuildContext context) async {
@@ -351,11 +355,14 @@ class _HomePageState extends State<HomePage> {
                               imageFile: _selectedImage!,
                             );
                             newAvatarUrl = response['avatar_url'];
+                            print('Uploaded avatar URL: $newAvatarUrl'); // Debug print
                             
+                            // Update Firebase user profile
                             await user.updatePhotoURL(newAvatarUrl);
                           }
                         }
 
+                        // Update profile with new name and avatar URL
                         widget.onUpdateProfile(newName, newAvatarUrl: newAvatarUrl);
                         
                         if (mounted) {
@@ -363,6 +370,7 @@ class _HomePageState extends State<HomePage> {
                             _currentUserName = newName;
                             if (newAvatarUrl != null) {
                               _currentAvatarUrl = newAvatarUrl;
+                              print('Updated current avatar URL to: $_currentAvatarUrl'); // Debug print
                             }
                           });
                           Navigator.of(context).pop();
@@ -447,6 +455,8 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    print('Building HomePage with avatar URL: $_currentAvatarUrl'); // Debug print
+    
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.surface,
       appBar: AppBar(

@@ -27,7 +27,7 @@ class ApiService {
       if (response.statusCode == 200 || response.statusCode == 201) {
         return jsonDecode(response.body);
       } else {
-        throw Exception('Failed to sync user: ${response.statusCode}');
+        throw Exception('Failed to sync user: ${response.statusCode} - ${response.body}');
       }
     } catch (e) {
       throw Exception('Failed to sync user: $e');
@@ -53,7 +53,7 @@ class ApiService {
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       } else {
-        throw Exception('Failed to update profile: ${response.statusCode}');
+        throw Exception('Failed to update profile: ${response.statusCode} - ${response.body}');
       }
     } catch (e) {
       throw Exception('Failed to update profile: $e');
@@ -69,7 +69,7 @@ class ApiService {
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       } else {
-        throw Exception('Failed to get user: ${response.statusCode}');
+        throw Exception('Failed to get user: ${response.statusCode} - ${response.body}');
       }
     } catch (e) {
       throw Exception('Failed to get user: $e');
@@ -102,7 +102,7 @@ class ApiService {
       if (response.statusCode == 200) {
         return jsonDecode(responseData);
       } else {
-        throw Exception('Failed to upload avatar: ${response.statusCode}');
+        throw Exception('Failed to upload avatar: ${response.statusCode} - $responseData');
       }
     } catch (e) {
       throw Exception('Failed to upload avatar: $e');
