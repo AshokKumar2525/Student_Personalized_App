@@ -2,34 +2,47 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'api_service.dart';
 
 class LoginPage extends StatelessWidget {
-final void Function(String) onLoginSuccess;
+  final void Function(String, [String?]) onLoginSuccess;
   const LoginPage({super.key, required this.onLoginSuccess});
 
   Future<void> signInWithGoogle(BuildContext context) async {
     try {
       final GoogleSignIn googleSignIn = GoogleSignIn();
-
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+      
       if (googleUser == null) {
-        // user cancelled
         return;
       }
 
       final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
 
-      await FirebaseAuth.instance.signInWithCredential(credential);
+      final UserCredential userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
+      final User? firebaseUser = userCredential.user;
 
-      // Pass the user name to main page
-      onLoginSuccess(
-        googleUser.displayName ?? ""
-      );
+      if (firebaseUser != null) {
+        try {
+          await ApiService.syncUser(
+            firebaseUid: firebaseUser.uid,
+            email: firebaseUser.email ?? '',
+            fullName: firebaseUser.displayName ?? googleUser.displayName,
+            avatarUrl: firebaseUser.photoURL,
+          );
+        } catch (e) {
+          print('Failed to sync user with backend: $e');
+        }
+
+        onLoginSuccess(
+          firebaseUser.displayName ?? googleUser.displayName ?? "",
+          firebaseUser.photoURL,
+        );
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Login failed: $e')),
@@ -45,7 +58,6 @@ final void Function(String) onLoginSuccess;
       backgroundColor: Colors.white,
       body: Stack(
         children: [
-          // Top background circle animation
           Positioned(
             top: -screenHeight * 0.15,
             left: -screenHeight * 0.15,
@@ -60,7 +72,6 @@ final void Function(String) onLoginSuccess;
             ),
           ),
 
-          // Bottom background circle animation
           Positioned(
             bottom: -screenHeight * 0.2,
             right: -screenHeight * 0.2,
@@ -75,12 +86,10 @@ final void Function(String) onLoginSuccess;
             ),
           ),
 
-          // Main content
           Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // App Title
                 Text(
                   'Welcome To SPA',
                   style: TextStyle(
@@ -92,7 +101,6 @@ final void Function(String) onLoginSuccess;
 
                 const SizedBox(height: 40),
 
-                // Google Sign-In Button
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
