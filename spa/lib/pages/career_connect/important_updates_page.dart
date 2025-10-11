@@ -2,7 +2,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 class ImportantUpdatesPage extends StatefulWidget {
   const ImportantUpdatesPage({super.key});
@@ -49,14 +48,6 @@ class _ImportantUpdatesPageState extends State<ImportantUpdatesPage> {
     });
   }
 
-  Future<void> _launchURL(String url) async {
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
-    } else {
-      debugPrint('Could not launch $url');
-    }
-  }
 
   Future<void> _removeImportantUpdate(Map<String, dynamic> update) async {
     final prefs = await SharedPreferences.getInstance();

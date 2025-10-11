@@ -9,6 +9,15 @@ from werkzeug.utils import secure_filename
 
 auth_bp = Blueprint('auth', __name__)
 
+# Add these configurations
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+UPLOAD_FOLDER = 'static/uploads/avatars'
+MAX_FILE_SIZE = 2 * 1024 * 1024  # 2MB
+
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 @auth_bp.route('/api/auth/sync-user', methods=['POST'])
 def sync_user():
     try:
@@ -111,17 +120,6 @@ def update_profile():
         db.session.rollback()
         return jsonify({'error': f'Failed to update profile: {str(e)}'}), 500
 
-
-
-# Add these configurations
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
-UPLOAD_FOLDER = 'static/uploads/avatars'
-MAX_FILE_SIZE = 2 * 1024 * 1024  # 2MB
-
-def allowed_file(filename):
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
 @auth_bp.route('/api/auth/upload-avatar', methods=['POST'])
 def upload_avatar():
     try:
@@ -147,15 +145,20 @@ def upload_avatar():
                 return jsonify({'error': 'File size too large. Maximum 2MB allowed.'}), 400
             
             # Create upload directory if it doesn't exist
-            os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+            upload_dir = os.path.join(os.getcwd(), UPLOAD_FOLDER)
+            os.makedirs(upload_dir, exist_ok=True)
             
             # Generate unique filename
             file_extension = file.filename.rsplit('.', 1)[1].lower()
             filename = f"{firebase_uid}_{uuid.uuid4().hex[:8]}.{file_extension}"
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            filepath = os.path.join(upload_dir, filename)
             
             # Save file
             file.save(filepath)
+            
+            # Verify file was saved
+            if not os.path.exists(filepath):
+                return jsonify({'error': 'Failed to save avatar file'}), 500
             
             # Update user's avatar_url in database
             avatar_url = f"/static/uploads/avatars/{filename}"  # This matches our route
@@ -171,6 +174,9 @@ def upload_avatar():
                     'avatar_url': avatar_url
                 }), 200
             else:
+                # Clean up the uploaded file if user not found
+                if os.path.exists(filepath):
+                    os.remove(filepath)
                 return jsonify({'error': 'User not found'}), 404
         
         return jsonify({'error': 'Invalid file type. Allowed: png, jpg, jpeg, gif'}), 400

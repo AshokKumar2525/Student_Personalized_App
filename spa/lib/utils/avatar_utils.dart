@@ -64,7 +64,8 @@ class AvatarUtils {
           print('Failed to load avatar image: $exception');
           // If network image fails, it will fall back to the child (initials)
         },
-        child: _buildInitialsText(name, size),
+        // Remove the child parameter - this was causing the issue
+        // The initials should only show when the image fails to load
       );
     } else {
       return _buildInitialsAvatar(name, size);
