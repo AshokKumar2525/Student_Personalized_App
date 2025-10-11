@@ -10,7 +10,6 @@ final void Function(String) onLoginSuccess;
   Future<void> signInWithGoogle(BuildContext context) async {
     try {
       final GoogleSignIn googleSignIn = GoogleSignIn();
-await googleSignIn.signOut();
 
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
       if (googleUser == null) {
@@ -83,7 +82,7 @@ await googleSignIn.signOut();
               children: [
                 // App Title
                 Text(
-                  'Welcome',
+                  'Welcome To SPA',
                   style: TextStyle(
                     fontSize: 36,
                     fontWeight: FontWeight.bold,

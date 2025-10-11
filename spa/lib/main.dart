@@ -5,7 +5,7 @@ import 'pages/career_connect/tech_updates_page.dart';
 import 'firebase_options.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-// import 'package:google_sign_in/google_sign_in.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -123,18 +123,17 @@ class HomePage extends StatelessWidget {
             onSelected: (value) async {
               if (value == "Logout") {
                 // Sign out Google and Firebase
-                // ignore: unused_local_variable
-                // final googleSignIn = GoogleSignIn();
-                // await googleSignIn.signOut();
+                final googleSignIn = GoogleSignIn();
+                await googleSignIn.signOut();
                 await FirebaseAuth.instance.signOut();
                 SharedPreferences prefs = await SharedPreferences.getInstance();
                 await prefs.setBool('isLoggedIn', false);
 
-                // Navigate to login page
+                // Restart app to show login page
                 Navigator.of(context).pushAndRemoveUntil(
-  MaterialPageRoute(builder: (_) => const MyApp()),
-  (route) => false,
-);
+                  MaterialPageRoute(builder: (_) => const MyApp()),
+                  (route) => false,
+                );
               }
             },
             itemBuilder: (BuildContext context) {
