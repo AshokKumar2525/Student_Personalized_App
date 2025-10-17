@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 class AvatarUtils {
   static const String baseUrl = 'http://10.140.91.96:5000';
@@ -49,28 +50,28 @@ class AvatarUtils {
     return colors[index];
   }
 
-  static Widget buildAvatar({
-    required String? imageUrl,
-    required String name,
-    double size = 40,
-  }) {
-    final fullUrl = getFullAvatarUrl(imageUrl);
-    
-    if (fullUrl.isNotEmpty) {
-      return CircleAvatar(
+  // In avatar_utils.dart
+static Widget buildAvatar({
+  required String? imageUrl,
+  required String name,
+  double size = 40,
+}) {
+  final fullUrl = getFullAvatarUrl(imageUrl);
+  
+  if (fullUrl.isNotEmpty) {
+    return CachedNetworkImage(
+      imageUrl: fullUrl,
+      imageBuilder: (context, imageProvider) => CircleAvatar(
         radius: size / 2,
-        backgroundImage: NetworkImage(fullUrl),
-        onBackgroundImageError: (exception, stackTrace) {
-          print('Failed to load avatar image: $exception');
-          // If network image fails, it will fall back to the child (initials)
-        },
-        // Remove the child parameter - this was causing the issue
-        // The initials should only show when the image fails to load
-      );
-    } else {
-      return _buildInitialsAvatar(name, size);
-    }
+        backgroundImage: imageProvider,
+      ),
+      placeholder: (context, url) => _buildInitialsAvatar(name, size),
+      errorWidget: (context, url, error) => _buildInitialsAvatar(name, size),
+    );
+  } else {
+    return _buildInitialsAvatar(name, size);
   }
+}
 
   static Widget _buildInitialsAvatar(String name, double size) {
     return CircleAvatar(

@@ -9,46 +9,64 @@ class LoginPage extends StatelessWidget {
   const LoginPage({super.key, required this.onLoginSuccess});
 
   Future<void> signInWithGoogle(BuildContext context) async {
-    try {
-      final GoogleSignIn googleSignIn = GoogleSignIn();
-      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
-      
-      if (googleUser == null) {
-        return;
-      }
-
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-
-      final UserCredential userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
-      final User? firebaseUser = userCredential.user;
-
-      if (firebaseUser != null) {
-        try {
-          await ApiService.syncUser(
-            firebaseUid: firebaseUser.uid,
-            email: firebaseUser.email ?? '',
-            fullName: firebaseUser.displayName ?? googleUser.displayName,
-            avatarUrl: firebaseUser.photoURL,
-          );
-        } catch (e) {
-          print('Failed to sync user with backend: $e');
-        }
-
-        onLoginSuccess(
-          firebaseUser.displayName ?? googleUser.displayName ?? "",
-          firebaseUser.photoURL,
-        );
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Login failed: $e')),
-      );
+  try {
+    print('🔄 [DEBUG] Starting Google sign in...');
+    final GoogleSignIn googleSignIn = GoogleSignIn();
+    final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+    
+    if (googleUser == null) {
+      print('❌ [DEBUG] Google sign in cancelled by user');
+      return;
     }
+
+    print('✅ [DEBUG] Google user obtained: ${googleUser.email}');
+    final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+    
+    final credential = GoogleAuthProvider.credential(
+      accessToken: googleAuth.accessToken,
+      idToken: googleAuth.idToken,
+    );
+
+    print('🔄 [DEBUG] Signing in with Firebase...');
+    final UserCredential userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
+    final User? firebaseUser = userCredential.user;
+
+    if (firebaseUser != null) {
+      print('✅ [DEBUG] Firebase user authenticated: ${firebaseUser.uid}');
+      print('🔍 [DEBUG] Firebase user email: ${firebaseUser.email}');
+      print('🔍 [DEBUG] Firebase user displayName: ${firebaseUser.displayName}');
+      print('🔍 [DEBUG] Firebase user photoURL: ${firebaseUser.photoURL}');
+      
+      try {
+        print('🔄 [DEBUG] Calling API service to sync user...');
+        await ApiService.syncUser(
+          firebaseUid: firebaseUser.uid,
+          email: firebaseUser.email ?? '',
+          fullName: firebaseUser.displayName ?? googleUser.displayName,
+          avatarUrl: firebaseUser.photoURL,
+        );
+        print('✅ [DEBUG] User sync completed successfully');
+      } catch (e) {
+        print('❌ [ERROR] Failed to sync user with backend: $e');
+        // Don't throw here - allow login to continue even if sync fails
+      }
+
+      print('🔄 [DEBUG] Calling onLoginSuccess callback...');
+      onLoginSuccess(
+        firebaseUser.displayName ?? googleUser.displayName ?? "User",
+        firebaseUser.photoURL,
+      );
+      print('✅ [DEBUG] Login process completed');
+    } else {
+      print('❌ [DEBUG] Firebase user is null after sign in');
+    }
+  } catch (e) {
+    print('❌ [ERROR] Login failed: $e');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Login failed: $e')),
+    );
   }
+}
 
   @override
   Widget build(BuildContext context) {

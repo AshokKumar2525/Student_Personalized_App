@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'LoginPage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'pages/career_connect/tech_updates_page.dart';
+// import 'pages/learning_path_finder/learning_path_page.dart';
 import 'firebase_options.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -75,39 +76,50 @@ class _MyAppState extends State<MyApp> {
   }
 
   Future<void> _updateDisplayName(String newName, {String? newAvatarUrl}) async {
-    if (newName.trim().isNotEmpty) {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String cleanedName = _cleanUserName(newName);
-      
-      final user = FirebaseAuth.instance.currentUser;
-      
-      if (user != null) {
-        try {
-          await ApiService.updateProfile(
-            firebaseUid: user.uid,
-            fullName: cleanedName,
-            avatarUrl: newAvatarUrl,
-          );
-        } catch (e) {
-          print('Failed to update profile in backend: $e');
-        }
-      }
-      
-      await prefs.setString('displayName', cleanedName);
-      
-      if (newAvatarUrl != null) {
-        await prefs.setString('avatarUrl', newAvatarUrl);
-        print('Saved new avatar URL: $newAvatarUrl'); // Debug print
-      }
-      
-      setState(() {
-        _userName = cleanedName;
+  if (newName.trim().isNotEmpty) {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String cleanedName = _cleanUserName(newName);
+    
+    final user = FirebaseAuth.instance.currentUser;
+    
+    if (user != null) {
+      try {
+        // Update profile in backend
+        await ApiService.updateProfile(
+          firebaseUid: user.uid,
+          fullName: cleanedName,
+          avatarUrl: newAvatarUrl,
+        );
+        
+        // Update Firebase user profile
+        await user.updateProfile(displayName: cleanedName);
         if (newAvatarUrl != null) {
-          _avatarUrl = newAvatarUrl;
+          await user.updatePhotoURL(newAvatarUrl);
         }
-      });
+        
+        print('✅ [DEBUG] Profile updated in Firebase and backend');
+      } catch (e) {
+        print('❌ [ERROR] Failed to update profile in backend: $e');
+        // Continue to update local storage even if backend update fails
+      }
     }
+    
+    // Update local storage
+    await prefs.setString('displayName', cleanedName);
+    
+    if (newAvatarUrl != null) {
+      await prefs.setString('avatarUrl', newAvatarUrl);
+      print('✅ [DEBUG] Saved new avatar URL: $newAvatarUrl');
+    }
+    
+    setState(() {
+      _userName = cleanedName;
+      if (newAvatarUrl != null) {
+        _avatarUrl = newAvatarUrl;
+      }
+    });
   }
+}
 
   @override
   Widget build(BuildContext context) {
@@ -193,238 +205,239 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _showUpdateProfileDialog() {
-    TextEditingController nameController = TextEditingController(text: _currentUserName);
-    File? _selectedImage;
-    bool _uploading = false;
+  TextEditingController nameController = TextEditingController(text: _currentUserName);
+  File? _selectedImage;
+  bool _uploading = false;
 
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: const Text('Update Profile'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Column(
-                      children: [
-                        Stack(
-                          children: [
-                            Container(
-                              width: 100,
-                              height: 100,
+  showDialog(
+    context: context,
+    builder: (BuildContext context) {
+      return StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: const Text('Update Profile'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Column(
+                    children: [
+                      Stack(
+                        children: [
+                          Container(
+                            width: 100,
+                            height: 100,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.grey.shade300,
+                                width: 2,
+                              ),
+                            ),
+                            child: ClipOval(
+                              child: _selectedImage != null
+                                  ? Image.file(
+                                      _selectedImage!,
+                                      fit: BoxFit.cover,
+                                      width: 100,
+                                      height: 100,
+                                    )
+                                  : AvatarUtils.buildAvatar(
+                                      imageUrl: _currentAvatarUrl,
+                                      name: nameController.text.isEmpty ? _currentUserName : nameController.text,
+                                      size: 100,
+                                    ),
+                            ),
+                          ),
+                          Positioned(
+                            bottom: 0,
+                            right: 0,
+                            child: Container(
+                              width: 36,
+                              height: 36,
                               decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.primary,
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                  color: Colors.grey.shade300,
+                                  color: Colors.white,
                                   width: 2,
                                 ),
                               ),
-                              child: ClipOval(
-                                child: _selectedImage != null
-                                    ? Image.file(
-                                        _selectedImage!,
-                                        fit: BoxFit.cover,
-                                        width: 100,
-                                        height: 100,
-                                      )
-                                    : AvatarUtils.buildAvatar(
-                                        imageUrl: _currentAvatarUrl,
-                                        name: nameController.text.isEmpty ? _currentUserName : nameController.text,
-                                        size: 100,
-                                      ),
-                              ),
-                            ),
-                            Positioned(
-                              bottom: 0,
-                              right: 0,
-                              child: Container(
-                                width: 36,
-                                height: 36,
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context).colorScheme.primary,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: Colors.white,
-                                    width: 2,
-                                  ),
-                                ),
-                                child: IconButton(
-                                  icon: const Icon(Icons.camera_alt_rounded, size: 18),
-                                  color: Colors.white,
-                                  onPressed: _uploading
-                                      ? null
-                                      : () async {
-                                          final ImagePicker picker = ImagePicker();
-                                          final XFile? image = await showModalBottomSheet<XFile>(
-                                            context: context,
-                                            builder: (context) => SafeArea(
-                                              child: Column(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  ListTile(
-                                                    leading: const Icon(Icons.photo_library_rounded),
-                                                    title: const Text('Choose from Gallery'),
-                                                    onTap: () async {
-                                                      final XFile? image = await picker.pickImage(
-                                                        source: ImageSource.gallery,
-                                                        maxWidth: 800,
-                                                        maxHeight: 800,
-                                                        imageQuality: 80,
-                                                      );
-                                                      Navigator.pop(context, image);
-                                                    },
-                                                  ),
-                                                  ListTile(
-                                                    leading: const Icon(Icons.photo_camera_rounded),
-                                                    title: const Text('Take Photo'),
-                                                    onTap: () async {
-                                                      final XFile? image = await picker.pickImage(
-                                                        source: ImageSource.camera,
-                                                        maxWidth: 800,
-                                                        maxHeight: 800,
-                                                        imageQuality: 80,
-                                                      );
-                                                      Navigator.pop(context, image);
-                                                    },
-                                                  ),
-                                                ],
-                                              ),
+                              child: IconButton(
+                                icon: const Icon(Icons.camera_alt_rounded, size: 18),
+                                color: Colors.white,
+                                onPressed: _uploading
+                                    ? null
+                                    : () async {
+                                        final ImagePicker picker = ImagePicker();
+                                        final XFile? image = await showModalBottomSheet<XFile>(
+                                          context: context,
+                                          builder: (context) => SafeArea(
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                ListTile(
+                                                  leading: const Icon(Icons.photo_library_rounded),
+                                                  title: const Text('Choose from Gallery'),
+                                                  onTap: () async {
+                                                    final XFile? image = await picker.pickImage(
+                                                      source: ImageSource.gallery,
+                                                      maxWidth: 800,
+                                                      maxHeight: 800,
+                                                      imageQuality: 80,
+                                                    );
+                                                    Navigator.pop(context, image);
+                                                  },
+                                                ),
+                                                ListTile(
+                                                  leading: const Icon(Icons.photo_camera_rounded),
+                                                  title: const Text('Take Photo'),
+                                                  onTap: () async {
+                                                    final XFile? image = await picker.pickImage(
+                                                      source: ImageSource.camera,
+                                                      maxWidth: 800,
+                                                      maxHeight: 800,
+                                                      imageQuality: 80,
+                                                    );
+                                                    Navigator.pop(context, image);
+                                                  },
+                                                ),
+                                              ],
                                             ),
-                                          );
+                                          ),
+                                        );
 
-                                          if (image != null) {
-                                            setState(() {
-                                              _selectedImage = File(image.path);
-                                            });
-                                          }
-                                        },
-                                ),
+                                        if (image != null) {
+                                          setState(() {
+                                            _selectedImage = File(image.path);
+                                          });
+                                        }
+                                      },
                               ),
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Tap camera icon to update photo',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
                           ),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 24),
-
-                    TextField(
-                      controller: nameController,
-                      decoration: const InputDecoration(
-                        labelText: 'Display Name',
-                        hintText: 'Enter your preferred name',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.person_rounded),
+                        ],
                       ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Tap camera icon to update photo',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Display Name',
+                      hintText: 'Enter your preferred name',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.person_rounded),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              actions: [
-                TextButton(
-                  onPressed: _uploading ? null : () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: _uploading ? null : () async {
-                    String newName = nameController.text.trim();
-                    if (newName.isNotEmpty) {
-                      setState(() {
-                        _uploading = true;
-                      });
+            ),
+            actions: [
+              TextButton(
+                onPressed: _uploading ? null : () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: _uploading ? null : () async {
+                  String newName = nameController.text.trim();
+                  if (newName.isNotEmpty) {
+                    setState(() {
+                      _uploading = true;
+                    });
 
-                      try {
-                        String? newAvatarUrl;
+                    try {
+                      String? newAvatarUrl;
 
-                        if (_selectedImage != null) {
-                          final user = FirebaseAuth.instance.currentUser;
-                          if (user != null) {
-                            final response = await ApiService.uploadAvatar(
-                              firebaseUid: user.uid,
-                              imageFile: _selectedImage!,
-                            );
-                            newAvatarUrl = response['avatar_url'];
-                            print('Uploaded avatar URL: $newAvatarUrl'); // Debug print
-                            
-                            // Update Firebase user profile
-                            await user.updatePhotoURL(newAvatarUrl);
-                          }
-                        }
-
-                        // Update profile with new name and avatar URL
-                        widget.onUpdateProfile(newName, newAvatarUrl: newAvatarUrl);
-                        
-                        if (mounted) {
-                          setState(() {
-                            _currentUserName = newName;
-                            if (newAvatarUrl != null) {
-                              _currentAvatarUrl = newAvatarUrl;
-                              print('Updated current avatar URL to: $_currentAvatarUrl'); // Debug print
-                            }
-                          });
-                          Navigator.of(context).pop();
+                      // Upload new avatar if selected
+                      if (_selectedImage != null) {
+                        final user = FirebaseAuth.instance.currentUser;
+                        if (user != null) {
+                          final response = await ApiService.uploadAvatar(
+                            firebaseUid: user.uid,
+                            imageFile: _selectedImage!,
+                          );
+                          newAvatarUrl = response['avatar_url'];
+                          print('✅ [DEBUG] Uploaded avatar URL: $newAvatarUrl');
                           
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Profile updated successfully!'),
-                              backgroundColor: Colors.green,
-                            ),
-                          );
-                        }
-                      } catch (e) {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Failed to update profile: $e'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                        }
-                      } finally {
-                        if (mounted) {
-                          setState(() {
-                            _uploading = false;
-                          });
+                          // Update Firebase user profile with new avatar
+                          await user.updatePhotoURL(newAvatarUrl);
                         }
                       }
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Please enter a display name'),
-                          backgroundColor: Colors.orange,
-                        ),
-                      );
-                    }
-                  },
-                  child: _uploading
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+
+                      // Update profile with new name and avatar URL
+                      await widget.onUpdateProfile(newName, newAvatarUrl: newAvatarUrl);
+                      
+                      if (mounted) {
+                        setState(() {
+                          _currentUserName = newName;
+                          if (newAvatarUrl != null) {
+                            _currentAvatarUrl = newAvatarUrl;
+                            print('✅ [DEBUG] Updated current avatar URL to: $_currentAvatarUrl');
+                          }
+                        });
+                        Navigator.of(context).pop();
+                        
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Profile updated successfully!'),
+                            backgroundColor: Colors.green,
                           ),
-                        )
-                      : const Text('Save'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
+                        );
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Failed to update profile: $e'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    } finally {
+                      if (mounted) {
+                        setState(() {
+                          _uploading = false;
+                        });
+                      }
+                    }
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Please enter a display name'),
+                        backgroundColor: Colors.orange,
+                      ),
+                    );
+                  }
+                },
+                child: _uploading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : const Text('Save'),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+}
 
   final List<Map<String, dynamic>> highlights = const [
     {
@@ -694,11 +707,11 @@ class FeaturesList extends StatelessWidget {
 
   final List<String> features = const [
     "Tech Updates",
+    "Learning Path Finder",
     "Body Fitness",
     "Academic Performance",
     "Medicine Related",
     "English Communication",
-    "Domain & Project Updates",
     "Scholarship Related",
     "Important Email Summarizer",
     "Financial Expense Tracker",
@@ -756,6 +769,13 @@ class FeaturesList extends StatelessWidget {
                   MaterialPageRoute(builder: (context) => const TechUpdatesPage()),
                 );
               }
+              // else if (features[index] == "Learning Path Finder") {
+              //   Navigator.push(
+              //     context,
+              //     MaterialPageRoute(builder: (context) => const LearningPathPage()),
+              //   );
+              // }
+              // Add other feature navigations here
             },
           ),
         );
