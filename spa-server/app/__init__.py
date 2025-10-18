@@ -46,12 +46,12 @@ def create_app():
         # Import and register blueprints
         from app.routes.auth_routes import auth_bp
         from app.routes.mainpage_routes import main_bp
-        # from app.routes.learning_pathfinder_routes import learning_pathfinder_bp
+        from app.routes.learning_pathfinder_routes import learning_pathfinder_bp
         # from app.routes.notification_routes import notification_bp
 
-        app.register_blueprint(auth_bp)
+        app.register_blueprint(auth_bp,url_prefix='/api')
         app.register_blueprint(main_bp)
-        # app.register_blueprint(learning_pathfinder_bp)
+        app.register_blueprint(learning_pathfinder_bp,url_prefix='/api')
         # app.register_blueprint(notification_bp, url_prefix='/notifications')
 
         # Create upload directories if they don't exist

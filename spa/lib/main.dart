@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'LoginPage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'pages/career_connect/tech_updates_page.dart';
-// import 'pages/learning_path_finder/learning_path_page.dart';
+import 'pages/learning_path_finder/learning_path_page.dart';
 import 'firebase_options.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -768,13 +768,12 @@ class FeaturesList extends StatelessWidget {
                   context,
                   MaterialPageRoute(builder: (context) => const TechUpdatesPage()),
                 );
+              }else if (features[index] == "Learning Path Finder") {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const LearningPathPage()),
+                );
               }
-              // else if (features[index] == "Learning Path Finder") {
-              //   Navigator.push(
-              //     context,
-              //     MaterialPageRoute(builder: (context) => const LearningPathPage()),
-              //   );
-              // }
               // Add other feature navigations here
             },
           ),

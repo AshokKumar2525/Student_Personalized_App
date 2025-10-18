@@ -20,7 +20,7 @@ def serve_avatar(filename):
     except FileNotFoundError:
         return jsonify({'error': 'Avatar not found'}), 404
 
-@auth_bp.route('/api/auth/sync-user', methods=['POST'])
+@auth_bp.route('/auth/sync-user', methods=['POST'])
 def sync_user():
     try:
         data = request.get_json()
@@ -139,7 +139,7 @@ def sync_user():
         db.session.rollback()
         return jsonify({'error': f'Failed to sync user: {str(e)}'}), 500
 
-@auth_bp.route('/api/auth/update-profile', methods=['PUT'])
+@auth_bp.route('/auth/update-profile', methods=['PUT'])
 def update_profile():
     try:
         data = request.get_json()
@@ -172,7 +172,7 @@ def update_profile():
         db.session.rollback()
         return jsonify({'error': f'Failed to update profile: {str(e)}'}), 500
 
-@auth_bp.route('/api/auth/upload-avatar', methods=['POST'])
+@auth_bp.route('/auth/upload-avatar', methods=['POST'])
 def upload_avatar():
     try:
         if 'avatar' not in request.files:
@@ -228,7 +228,7 @@ def upload_avatar():
         current_app.logger.error(f"Error uploading avatar: {str(e)}")
         return jsonify({'error': f'Failed to upload avatar: {str(e)}'}), 500
 
-@auth_bp.route('/api/auth/user/<firebase_uid>', methods=['GET'])
+@auth_bp.route('/auth/user/<firebase_uid>', methods=['GET'])
 def get_user(firebase_uid):
     try:
         user = User.query.filter_by(id=firebase_uid).first()

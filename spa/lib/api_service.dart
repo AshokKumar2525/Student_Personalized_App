@@ -147,7 +147,8 @@ static Future<Map<String, dynamic>> syncUser({
     }
   }
 
-  static Future<Map<String, dynamic>> generateLearningPath(Map<String, dynamic> assessmentData) async {
+
+static Future<Map<String, dynamic>> generateLearningPath(Map<String, dynamic> assessmentData) async {
   try {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw Exception('User not authenticated');
@@ -156,7 +157,6 @@ static Future<Map<String, dynamic>> syncUser({
       Uri.parse('$baseUrl/api/learning-path/generate-roadmap'),
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ${await user.getIdToken()}',
       },
       body: jsonEncode({
         'firebase_uid': user.uid,
@@ -174,21 +174,18 @@ static Future<Map<String, dynamic>> syncUser({
     }
   } catch (e) {
     print('Error generating roadmap: $e');
-    // Return mock data for development if no API keys
+    // Return mock data for development
     return _getMockRoadmapData(assessmentData);
   }
 }
 
-static Future<Map<String, dynamic>> getUserLearningPath() async {
+  static Future<Map<String, dynamic>> getUserLearningPath() async {
   try {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw Exception('User not authenticated');
 
     final response = await http.get(
-      Uri.parse('$baseUrl/api/learning-path/user-roadmap'),
-      headers: {
-        'Authorization': 'Bearer ${await user.getIdToken()}',
-      },
+      Uri.parse('$baseUrl/api/learning-path/user-roadmap?firebase_uid=${user.uid}'),
     );
 
     if (response.statusCode == 200) {
@@ -204,112 +201,252 @@ static Future<Map<String, dynamic>> getUserLearningPath() async {
   }
 }
 
-  
-static Future<Map<String, dynamic>> updateModuleProgress(int moduleId, String status) async {
-  try {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) throw Exception('User not authenticated');
+  static Future<void> updateModuleProgress(int moduleId, String status) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
 
-    final response = await http.post(
-      Uri.parse('$baseUrl/api/learning-path/update-progress'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ${await user.getIdToken()}',
-      },
-      body: jsonEncode({
-        'module_id': moduleId,
-        'status': status,
-      }),
-    );
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/learning-path/update-progress'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'firebase_uid': user.uid,
+          'module_id': moduleId,
+          'status': status,
+        }),
+      );
 
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception('Failed to update progress: ${response.statusCode}');
+      if (response.statusCode != 200) {
+        throw Exception('Failed to update progress: ${response.body}');
+      }
+    } catch (e) {
+      throw Exception('Network error: $e');
     }
-  } catch (e) {
-    print('Error updating progress: $e');
-    throw e;
   }
-}
-
 
   static Map<String, dynamic> _getMockRoadmapData(Map<String, dynamic> assessmentData) {
+  final domain = assessmentData['domain'];
+  final level = assessmentData['knowledge_level'];
+  final domainName = _getDomainName(domain);
+  
   return {
     'message': 'Learning path generated successfully',
-    'path_id': 1,
-    'domain': assessmentData['domain'],
+    'path_id': 'mock_path_001',
+    'domain': domain,
     'roadmap': {
-      'domain': assessmentData['domain'],
-      'domain_name': _getDomainName(assessmentData['domain']),
-      'level': assessmentData['knowledge_level'],
+      'domain': domain,
+      'domain_name': domainName,
+      'level': level,
       'estimated_completion': '12 weeks',
       'progress_percentage': 0.0,
       'completed_modules': 0,
       'total_modules': 8,
-      'modules': [
+      'courses': [
         {
           'id': 1,
-          'title': 'Introduction to ${_getDomainName(assessmentData['domain'])}',
-          'description': 'Get started with the basics and understand core concepts',
+          'title': '$domainName Fundamentals',
+          'description': 'Learn the core concepts and basics of $domainName',
           'order': 1,
-          'estimated_time': 120,
-          'status': 'not_started',
-          'resources': [
+          'estimated_time': 600,
+          'modules': [
             {
               'id': 1,
-              'title': 'Official Documentation Overview',
-              'url': 'https://example.com/docs',
-              'type': 'documentation',
-              'difficulty': 'beginner'
+              'title': 'Introduction to $domainName',
+              'description': 'Get started with the basics and understand core concepts of $domainName',
+              'order': 1,
+              'estimated_time': 120,
+              'status': 'not_started',
+              'resources': [
+                {
+                  'id': 1,
+                  'title': 'Official $domainName Documentation',
+                  'url': 'https://example.com/docs',
+                  'type': 'documentation',
+                  'difficulty': 'beginner'
+                },
+                {
+                  'id': 2,
+                  'title': 'Beginner Tutorial Video',
+                  'url': 'https://youtube.com/watch?v=abc123',
+                  'type': 'video',
+                  'difficulty': 'beginner'
+                }
+              ]
             },
             {
               'id': 2,
-              'title': 'Beginner Tutorial Video',
-              'url': 'https://youtube.com/watch?v=abc123',
-              'type': 'video', 
-              'difficulty': 'beginner'
-            }
+              'title': 'Environment Setup & Tools',
+              'description': 'Set up your development environment and essential tools',
+              'order': 2,
+              'estimated_time': 90,
+              'status': 'not_started',
+              'resources': [
+                {
+                  'id': 3,
+                  'title': 'Installation Guide',
+                  'url': 'https://example.com/install',
+                  'type': 'documentation',
+                  'difficulty': 'beginner'
+                }
+              ]
+            },
+            {
+              'id': 3,
+              'title': 'Core Concepts Deep Dive',
+              'description': 'Master the fundamental building blocks and principles',
+              'order': 3,
+              'estimated_time': 180,
+              'status': 'not_started',
+              'resources': [
+                {
+                  'id': 4,
+                  'title': 'Core Concepts Tutorial',
+                  'url': 'https://example.com/core-concepts',
+                  'type': 'article',
+                  'difficulty': 'beginner'
+                }
+              ]
+            },
+            {
+              'id': 4,
+              'title': 'First Practical Project',
+              'description': 'Apply your knowledge by building your first project',
+              'order': 4,
+              'estimated_time': 210,
+              'status': 'not_started',
+              'resources': [
+                {
+                  'id': 5,
+                  'title': 'Project Tutorial',
+                  'url': 'https://example.com/project',
+                  'type': 'video',
+                  'difficulty': 'intermediate'
+                }
+              ]
+            },
           ]
         },
         {
           'id': 2,
-          'title': 'Environment Setup',
-          'description': 'Set up your development environment and tools',
+          'title': 'Advanced $domainName Concepts',
+          'description': 'Dive deeper into advanced topics, patterns, and best practices',
           'order': 2,
-          'estimated_time': 60,
-          'status': 'not_started',
-          'resources': [
+          'estimated_time': 800,
+          'modules': [
             {
-              'id': 3,
-              'title': 'Installation Guide',
-              'url': 'https://example.com/install',
-              'type': 'documentation',
-              'difficulty': 'beginner'
-            }
+              'id': 5,
+              'title': 'Advanced Techniques & Patterns',
+              'description': 'Learn advanced techniques and design patterns used in production',
+              'order': 1,
+              'estimated_time': 180,
+              'status': 'not_started',
+              'resources': [
+                {
+                  'id': 6,
+                  'title': 'Advanced Patterns Guide',
+                  'url': 'https://example.com/advanced-patterns',
+                  'type': 'article',
+                  'difficulty': 'intermediate'
+                }
+              ]
+            },
+            {
+              'id': 6,
+              'title': 'Real-world Applications',
+              'description': 'Build complex, real-world applications with best practices',
+              'order': 2,
+              'estimated_time': 240,
+              'status': 'not_started',
+              'resources': [
+                {
+                  'id': 7,
+                  'title': 'Real-world Project Tutorial',
+                  'url': 'https://example.com/real-world',
+                  'type': 'video',
+                  'difficulty': 'intermediate'
+                }
+              ]
+            },
+            {
+              'id': 7,
+              'title': 'Performance Optimization',
+              'description': 'Learn how to optimize your applications for better performance',
+              'order': 3,
+              'estimated_time': 150,
+              'status': 'not_started',
+              'resources': [
+                {
+                  'id': 8,
+                  'title': 'Performance Guide',
+                  'url': 'https://example.com/performance',
+                  'type': 'documentation',
+                  'difficulty': 'advanced'
+                }
+              ]
+            },
+            {
+              'id': 8,
+              'title': 'Deployment & Production',
+              'description': 'Deploy your applications to production environments',
+              'order': 4,
+              'estimated_time': 230,
+              'status': 'not_started',
+              'resources': [
+                {
+                  'id': 9,
+                  'title': 'Deployment Guide',
+                  'url': 'https://example.com/deployment',
+                  'type': 'article',
+                  'difficulty': 'intermediate'
+                }
+              ]
+            },
           ]
-        },
-        // Add more mock modules as needed
+        }
       ],
     },
   };
 }
-
   static String _getDomainName(String domainId) {
-    switch (domainId) {
-      case 'flutter':
-        return 'Flutter Development';
-      case 'web':
-        return 'Web Development';
-      case 'python':
-        return 'Python Programming';
-      case 'ai-ml':
-        return 'AI & Machine Learning';
-      case 'data-science':
-        return 'Data Science';
-      default:
-        return 'Programming';
-    }
+  switch (domainId) {
+    case 'web':
+      return 'Web Development';
+    case 'flutter':
+      return 'Flutter Development';
+    case 'python':
+      return 'Python Programming';
+    case 'ai-ml':
+      return 'AI & Machine Learning';
+    case 'data-science':
+      return 'Data Science';
+    case 'mobile':
+      return 'Mobile Development';
+    case 'cloud':
+      return 'Cloud Computing';
+    case 'cybersecurity':
+      return 'Cybersecurity';
+    case 'devops':
+      return 'DevOps';
+    case 'blockchain':
+      return 'Blockchain Development';
+    case 'game-dev':
+      return 'Game Development';
+    case 'ui-ux':
+      return 'UI/UX Design';
+    default:
+      // Capitalize and add "Development" for unknown domains
+      if (domainId.contains('-')) {
+        // Handle kebab-case: "ai-ml" -> "AI & ML Development"
+        final parts = domainId.split('-');
+        final capitalizedParts = parts.map((part) => 
+            part[0].toUpperCase() + part.substring(1).toLowerCase());
+        return capitalizedParts.join(' & ') + ' Development';
+      } else {
+        // Handle single word: "python" -> "Python Development"
+        return domainId[0].toUpperCase() + domainId.substring(1).toLowerCase() + ' Development';
+      }
   }
 }
-
+}

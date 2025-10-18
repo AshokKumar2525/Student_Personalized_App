@@ -76,18 +76,38 @@ class LearningPath(db.Model):
     # Relationships
     user = db.relationship('User', back_populates='learning_paths')
     domain = db.relationship('Domain')
-    modules = db.relationship('PathModule', back_populates='path', cascade='all, delete-orphan')
+    courses = db.relationship('Course', back_populates='learning_path', cascade='all, delete-orphan')
     versions = db.relationship('RoadmapVersion', back_populates='path', cascade='all, delete-orphan')
 
-class PathModule(db.Model):
-    """Individual topics in a learning path"""
-    __tablename__ = 'path_modules'
+class Course(db.Model):
+    """Courses within a learning path"""
+    __tablename__ = 'courses'
     __table_args__ = (
-        Index('idx_pathmodule_path', 'path_id', 'order'),
+        Index('idx_course_path', 'path_id', 'order'),
     )
 
-    id = db.Column(Integer, primary_key=True)
+    id = db.Column(Integer, primary_key=True) 
     path_id = db.Column(Integer, ForeignKey('learning_paths.id'), nullable=False, index=True)
+    title = db.Column(String(128), nullable=False)
+    description = db.Column(Text)
+    order = db.Column(Integer, nullable=False)
+    estimated_time = db.Column(Integer)  # Minutes for entire course
+    created_at = db.Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    learning_path = db.relationship('LearningPath', back_populates='courses')
+    modules = db.relationship('PathModule', back_populates='course', cascade='all, delete-orphan')
+
+class PathModule(db.Model):
+    """Individual topics in a course"""
+    __tablename__ = 'path_modules'
+    __table_args__ = (
+        Index('idx_pathmodule_course', 'course_id', 'order'),
+    )
+
+    id = db.Column(Integer, primary_key=True)  # Keep as Integer
+    course_id = db.Column(Integer, ForeignKey('courses.id'), nullable=False, index=True)
+    path_id = db.Column(Integer, ForeignKey('learning_paths.id'), nullable=False, index=True)  # Keep for backward compatibility
     tech_id = db.Column(Integer, ForeignKey('technologies.id'), index=True)
     title = db.Column(String(128), nullable=False)
     description = db.Column(Text)
@@ -97,7 +117,8 @@ class PathModule(db.Model):
     created_at = db.Column(DateTime, default=datetime.utcnow)
 
     # Relationships
-    path = db.relationship('LearningPath', back_populates='modules')
+    course = db.relationship('Course', back_populates='modules')
+    path = db.relationship('LearningPath')  # Keep for backward compatibility
     tech = db.relationship('Technology')
     resources = db.relationship('ModuleResource', back_populates='module', cascade='all, delete-orphan')
     progress = db.relationship('UserProgress', back_populates='module', 
