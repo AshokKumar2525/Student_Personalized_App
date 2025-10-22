@@ -31,7 +31,7 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-
+  webview_flutter: ^4.4.2
   # ✅ Compatible stable versions
   firebase_core: ^2.24.2
   firebase_auth: ^4.17.4

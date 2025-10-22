@@ -5,7 +5,7 @@ import 'package:http_parser/http_parser.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://10.140.91.96:5000'; // Replace with your backend URL
+  static const String baseUrl ='http://10.66.139.96:5000'; // Replace with your backend URL
 
   // Add this method to ApiService class
 static Future<Map<String, dynamic>> syncUser({
@@ -149,57 +149,104 @@ static Future<Map<String, dynamic>> syncUser({
 
 
 static Future<Map<String, dynamic>> generateLearningPath(Map<String, dynamic> assessmentData) async {
-  try {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) throw Exception('User not authenticated');
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
 
-    final response = await http.post(
-      Uri.parse('$baseUrl/api/learning-path/generate-roadmap'),
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({
-        'firebase_uid': user.uid,
-        ...assessmentData,
-      }),
-    );
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/learning-path/generate-roadmap'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'firebase_uid': user.uid,
+          ...assessmentData,
+        }),
+      );
 
-    print('Roadmap generation response: ${response.statusCode}');
-    print('Response body: ${response.body}');
+      print('Roadmap generation response: ${response.statusCode}');
+      print('Response body: ${response.body}');
 
-    if (response.statusCode == 200 || response.statusCode == 201) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception('Failed to generate roadmap: ${response.statusCode} - ${response.body}');
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Failed to generate roadmap: ${response.statusCode} - ${response.body}');
+      }
+    } catch (e) {
+      print('Error generating roadmap: $e');
+      // Return mock data for development
+      return _getMockRoadmapData(assessmentData);
     }
-  } catch (e) {
-    print('Error generating roadmap: $e');
-    // Return mock data for development
-    return _getMockRoadmapData(assessmentData);
   }
-}
+
+  static Future<Map<String, dynamic>> getModuleContent(int moduleId) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
+
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/learning-path/module-content/$moduleId?firebase_uid=${user.uid}'),
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Failed to get module content: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error getting module content: $e');
+      return _getMockModuleContent(moduleId);
+    }
+  }
+
+  static Future<Map<String, dynamic>> completeModule(int moduleId) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/learning-path/complete-module'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'firebase_uid': user.uid,
+          'module_id': moduleId,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Failed to complete module: ${response.statusCode} - ${response.body}');
+      }
+    } catch (e) {
+      print('Error completing module: $e');
+      rethrow;
+    }
+  }
 
   static Future<Map<String, dynamic>> getUserLearningPath() async {
-  try {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) throw Exception('User not authenticated');
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
 
-    final response = await http.get(
-      Uri.parse('$baseUrl/api/learning-path/user-roadmap?firebase_uid=${user.uid}'),
-    );
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/learning-path/user-roadmap?firebase_uid=${user.uid}'),
+      );
 
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else if (response.statusCode == 404) {
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else if (response.statusCode == 404) {
+        return {'has_path': false};
+      } else {
+        throw Exception('Failed to get roadmap: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error getting roadmap: $e');
       return {'has_path': false};
-    } else {
-      throw Exception('Failed to get roadmap: ${response.statusCode}');
     }
-  } catch (e) {
-    print('Error getting roadmap: $e');
-    return {'has_path': false};
   }
-}
 
   static Future<void> updateModuleProgress(int moduleId, String status) async {
     try {
@@ -224,6 +271,45 @@ static Future<Map<String, dynamic>> generateLearningPath(Map<String, dynamic> as
     } catch (e) {
       throw Exception('Network error: $e');
     }
+  }
+
+  static Map<String, dynamic> _getMockModuleContent(int moduleId) {
+    return {
+      'module': {
+        'id': moduleId,
+        'title': 'Sample Module',
+        'description': 'This is a sample module description',
+        'order': 1,
+        'estimated_time': 60
+      },
+      'educational_content': {
+        'explanation': 'This is a brief explanation of the module concept.',
+        'key_concepts': [
+          'Key concept 1 with simple explanation',
+          'Key concept 2 with simple explanation',
+          'Key concept 3 with simple explanation'
+        ],
+        'examples': [
+          'Practical example 1',
+          'Practical example 2'
+        ],
+        'practice_problems': [
+          'Practice problem 1',
+          'Practice problem 2'
+        ]
+      },
+      'resources': [
+        {
+          'id': 1,
+          'title': 'YouTube Tutorial',
+          'url': 'https://www.youtube.com/embed/dQw4w9WgXcQ',
+          'type': 'video',
+          'difficulty': 'beginner'
+        }
+      ],
+      'can_access': true,
+      'current_progress': 'not_started'
+    };
   }
 
   static Map<String, dynamic> _getMockRoadmapData(Map<String, dynamic> assessmentData) {

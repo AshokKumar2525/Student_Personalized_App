@@ -246,3 +246,7 @@ def get_user(firebase_uid):
         
     except Exception as e:
         return jsonify({'error': f'Failed to get user: {str(e)}'}), 500
+    
+@auth_bp.route('/auth/test', methods=['GET'])
+def test_endpoint():
+    return jsonify({'message': 'Auth router API is working!', 'status': 'success'})    

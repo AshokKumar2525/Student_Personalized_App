@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'module_content_page.dart';
 import '../../api_service.dart';
 
 class LearningPathPage extends StatefulWidget {
@@ -322,7 +323,7 @@ class _LearningPathPageState extends State<LearningPathPage> {
                           Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF1E88E5).withOpacity(0.1),
+                              color: const Color.fromRGBO(30, 136, 229, 0.1),
                               shape: BoxShape.circle,
                             ),
                             child: const Icon(
@@ -409,7 +410,7 @@ class _LearningPathPageState extends State<LearningPathPage> {
                     width: 50,
                     height: 50,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1E88E5).withOpacity(0.1),
+                      color: const Color.fromRGBO(30, 136, 229, 0.1),
                       shape: BoxShape.circle,
                     ),
                     child: Center(
@@ -510,21 +511,21 @@ class _LearningPathPageState extends State<LearningPathPage> {
     );
   }
 
-  void _navigateToCourseModules(Map<String, dynamic> course, int courseIndex) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => CourseModulesPage(
-          course: course,
-          courseIndex: courseIndex,
-          onModuleStatusChanged: () {
-            // Refresh the data when returning from module page
-            _checkExistingPath();
-          },
-        ),
+void _navigateToCourseModules(Map<String, dynamic> course, int courseIndex) {
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (context) => CourseModulesPage(
+        course: course,
+        courseIndex: courseIndex,
+        onModuleStatusChanged: () {
+          // Refresh the data when returning from module page
+          _checkExistingPath();
+        },
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 // New Page for Course Modules
@@ -563,7 +564,7 @@ class _CourseModulesPageState extends State<CourseModulesPage> {
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: const Color(0xFF1E88E5).withOpacity(0.1),
+              color: const Color.fromRGBO(30, 136, 229, 0.1),
               border: Border(
                 bottom: BorderSide(color: Colors.grey[300]!),
               ),
@@ -648,31 +649,46 @@ class _CourseModulesPageState extends State<CourseModulesPage> {
   }
 
   Widget _buildModuleCard(Map<String, dynamic> module, int moduleIndex, int courseIndex) {
-    final status = module['status'] ?? 'not_started';
-    Color statusColor = Colors.grey;
-    IconData statusIcon = Icons.pending_rounded;
+  final status = module['status'] ?? 'not_started';
+  Color statusColor = Colors.grey;
+  IconData statusIcon = Icons.pending_rounded;
 
-    switch (status) {
-      case 'completed':
-        statusColor = Colors.green;
-        statusIcon = Icons.check_circle_rounded;
-        break;
-      case 'in_progress':
-        statusColor = Colors.orange;
-        statusIcon = Icons.play_circle_rounded;
-        break;
-      case 'not_started':
-        statusColor = Colors.grey;
-        statusIcon = Icons.pending_rounded;
-        break;
-    }
+  switch (status) {
+    case 'completed':
+      statusColor = Colors.green;
+      statusIcon = Icons.check_circle_rounded;
+      break;
+    case 'in_progress':
+      statusColor = Colors.orange;
+      statusIcon = Icons.play_circle_rounded;
+      break;
+    case 'not_started':
+      statusColor = Colors.grey;
+      statusIcon = Icons.pending_rounded;
+      break;
+  }
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
+  return Card(
+    margin: const EdgeInsets.only(bottom: 12),
+    elevation: 2,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    child: InkWell(
+      onTap: () {
+        // Navigate to module content page
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ModuleContentPage(
+              moduleId: module['id'],
+              moduleTitle: module['title'],
+              courseIndex: courseIndex,
+              moduleIndex: moduleIndex,
+              onModuleCompleted: widget.onModuleStatusChanged,
+            ),
+          ),
+        );
+      },
+      borderRadius: BorderRadius.circular(12),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -684,7 +700,7 @@ class _CourseModulesPageState extends State<CourseModulesPage> {
                   width: 36,
                   height: 36,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1E88E5).withOpacity(0.1),
+                    color: const Color.fromRGBO(30, 136, 229, 0.1),
                     shape: BoxShape.circle,
                   ),
                   child: Center(
@@ -735,135 +751,32 @@ class _CourseModulesPageState extends State<CourseModulesPage> {
                   style: TextStyle(color: Colors.grey[600], fontSize: 12),
                 ),
                 const Spacer(),
-                ..._buildStatusButtons(module),
+                if (status != 'completed')
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color.fromRGBO(30, 136, 229, 0.1),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color.fromRGBO(30, 136, 229, 0.3)),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.play_arrow_rounded, size: 14, color: Color(0xFF1E88E5)),
+                        SizedBox(width: 4),
+                        Text(
+                          'Start',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFF1E88E5)),
+                        ),
+                      ],
+                    ),
+                  ),
               ],
             ),
-            if ((module['resources'] as List<dynamic>?)?.isNotEmpty ?? false) ...[
-              const SizedBox(height: 12),
-              const Text(
-                'Resources:',
-                style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
-              ),
-              const SizedBox(height: 8),
-              ..._buildResourceList(module['resources']),
-            ],
           ],
         ),
       ),
-    );
-  }
-
-  List<Widget> _buildStatusButtons(Map<String, dynamic> module) {
-    return [
-      _buildStatusButton('Start', Icons.play_arrow_rounded, Colors.blue, module),
-      const SizedBox(width: 8),
-      _buildStatusButton('Complete', Icons.check_rounded, Colors.green, module),
-    ];
-  }
-
-  Widget _buildStatusButton(String text, IconData icon, Color color, Map<String, dynamic> module) {
-    return GestureDetector(
-      onTap: () => _updateModuleStatus(module, text.toLowerCase()),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: color.withOpacity(0.3)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 14, color: color),
-            const SizedBox(width: 4),
-            Text(
-              text,
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: color),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  List<Widget> _buildResourceList(List<dynamic> resources) {
-    return resources.map<Widget>((resource) {
-      return ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: const Color(0xFF1E88E5).withOpacity(0.1),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(
-            _getResourceIcon(resource['type']),
-            color: const Color(0xFF1E88E5),
-            size: 18,
-          ),
-        ),
-        title: Text(
-          resource['title'] ?? 'Untitled Resource',
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-        ),
-        subtitle: Text(
-          '${resource['type']} • ${resource['difficulty']}',
-          style: const TextStyle(fontSize: 12),
-        ),
-        trailing: const Icon(Icons.open_in_new_rounded, size: 16),
-        onTap: () {
-          // Handle resource opening
-          print('Opening resource: ${resource['url']}');
-        },
-      );
-    }).toList();
-  }
-
-  IconData _getResourceIcon(String type) {
-    switch (type) {
-      case 'video':
-        return Icons.video_library_rounded;
-      case 'documentation':
-        return Icons.article_rounded;
-      case 'article':
-        return Icons.description_rounded;
-      default:
-        return Icons.link_rounded;
-    }
-  }
-
-  Future<void> _updateModuleStatus(Map<String, dynamic> module, String action) async {
-    try {
-      String status = 'not_started';
-      if (action == 'start') {
-        status = 'in_progress';
-      } else if (action == 'complete') {
-        status = 'completed';
-      }
-
-      await ApiService.updateModuleProgress(module['id'], status);
-      
-      setState(() {
-        module['status'] = status;
-      });
-
-      // Notify parent to refresh data
-      widget.onModuleStatusChanged();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Module marked as ${status.replaceAll('_', ' ')}'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to update progress: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
+    ),
+  );
+}
 }

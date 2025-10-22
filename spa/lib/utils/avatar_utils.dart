@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 class AvatarUtils {
-  static const String baseUrl = 'http://10.140.91.96:5000';
+  static const String baseUrl = 'http://10.66.139.96:5000';
 
   static String getFullAvatarUrl(String? relativeUrl) {
     if (relativeUrl == null || relativeUrl.isEmpty) {
