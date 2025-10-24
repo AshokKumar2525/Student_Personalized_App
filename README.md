@@ -121,7 +121,7 @@ flutter run -d <device_id>
 - **Ashok Kumar Malineni**
 - **Jyothi Reddy Nangamangalam**
 - **S.Dev Deepak**
-- **C.S.V.Mahendra**
+- **C.V.S.Mahendra**
 ---
 
 ## 📌 Future Scope
