@@ -5,7 +5,7 @@ import 'package:http_parser/http_parser.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class ApiService {
-  static const String baseUrl ='http://10.66.139.96:5000'; // Replace with your backend URL
+  static const String baseUrl ='http://10.140.91.96:5000'; // Replace with your backend URL
 
   // Add this method to ApiService class
 static Future<Map<String, dynamic>> syncUser({
@@ -15,10 +15,10 @@ static Future<Map<String, dynamic>> syncUser({
   String? avatarUrl,
 }) async {
   try {
-    print('🔄 [DEBUG] Syncing user with Firebase UID: $firebaseUid');
-    print('🔄 [DEBUG] User email: $email');
-    print('🔄 [DEBUG] User fullName: $fullName');
-    print('🔄 [DEBUG] User avatarUrl: $avatarUrl');
+    // print('🔄 [DEBUG] Syncing user with Firebase UID: $firebaseUid');
+    // print('🔄 [DEBUG] User email: $email');
+    // print('🔄 [DEBUG] User fullName: $fullName');
+    // print('🔄 [DEBUG] User avatarUrl: $avatarUrl');
 
     // Convert Firebase avatar URL to backend format if needed
     String? processedAvatarUrl = avatarUrl;
@@ -225,7 +225,29 @@ static Future<Map<String, dynamic>> generateLearningPath(Map<String, dynamic> as
       rethrow;
     }
   }
+  static Future<void> resetLearningPath() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
 
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/learning-path/reset'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'firebase_uid': user.uid,
+          'confirm': true,
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Failed to reset learning path: ${response.body}');
+      }
+    } catch (e) {
+      throw Exception('Network error: $e');
+    }
+  }
   static Future<Map<String, dynamic>> getUserLearningPath() async {
     try {
       final user = FirebaseAuth.instance.currentUser;
@@ -533,6 +555,37 @@ static Future<Map<String, dynamic>> generateLearningPath(Map<String, dynamic> as
         // Handle single word: "python" -> "Python Development"
         return domainId[0].toUpperCase() + domainId.substring(1).toLowerCase() + ' Development';
       }
+  }
+}
+
+static Future<Map<String, dynamic>> connectGmail({
+  required String firebaseUid,
+  required String accessToken,
+  String? refreshToken,
+}) async {
+  try {
+    print('🔄 [DEBUG] Connecting Gmail account...');
+    
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/email/connect'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'firebase_uid': firebaseUid,
+        'access_token': accessToken,
+        'refresh_token': refreshToken,
+      }),
+    );
+
+    print('📧 [DEBUG] Gmail connect response: ${response.statusCode}');
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to connect Gmail: ${response.statusCode} - ${response.body}');
+    }
+  } catch (e) {
+    print('❌ [ERROR] Failed to connect Gmail: $e');
+    rethrow;
   }
 }
 }

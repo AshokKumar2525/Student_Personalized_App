@@ -36,6 +36,9 @@ def create_app():
         from app.models.scholarships import Scholarship, ScholarshipCriteria, UserScholarshipPreference, user_saved_scholarships
         from app.models.notifications import Notification, UserNotificationPreference
         
+        # Import email summarizer models
+        from app.models.email_summarizer import EmailAccount, Email, EmailSummary
+        
         # Import remaining learning pathfinder models after core models
         from app.models.learning_pathfinder import (
             UserProfile, LearningPath, PathModule, ModuleResource, UserProgress,
@@ -47,12 +50,12 @@ def create_app():
         from app.routes.auth_routes import auth_bp
         from app.routes.mainpage_routes import main_bp
         from app.routes.learning_pathfinder_routes import learning_pathfinder_bp
-        # from app.routes.notification_routes import notification_bp
+        from app.routes.email_summarizer_routes import email_bp
 
-        app.register_blueprint(auth_bp,url_prefix='/api')
+        app.register_blueprint(auth_bp, url_prefix='/api')
         app.register_blueprint(main_bp)
-        app.register_blueprint(learning_pathfinder_bp,url_prefix='/api')
-        # app.register_blueprint(notification_bp, url_prefix='/notifications')
+        app.register_blueprint(learning_pathfinder_bp, url_prefix='/api')
+        app.register_blueprint(email_bp, url_prefix='/api')
 
         # Create upload directories if they don't exist
         with app.app_context():
@@ -62,4 +65,3 @@ def create_app():
         print(f"Error during app initialization: {e}")
         raise
     return app
-

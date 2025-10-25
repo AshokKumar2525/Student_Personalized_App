@@ -9,64 +9,95 @@ class LoginPage extends StatelessWidget {
   const LoginPage({super.key, required this.onLoginSuccess});
 
   Future<void> signInWithGoogle(BuildContext context) async {
-  try {
-    print('🔄 [DEBUG] Starting Google sign in...');
-    final GoogleSignIn googleSignIn = GoogleSignIn();
-    final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
-    
-    if (googleUser == null) {
-      print('❌ [DEBUG] Google sign in cancelled by user');
-      return;
-    }
-
-    print('✅ [DEBUG] Google user obtained: ${googleUser.email}');
-    final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-    
-    final credential = GoogleAuthProvider.credential(
-      accessToken: googleAuth.accessToken,
-      idToken: googleAuth.idToken,
-    );
-
-    print('🔄 [DEBUG] Signing in with Firebase...');
-    final UserCredential userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
-    final User? firebaseUser = userCredential.user;
-
-    if (firebaseUser != null) {
-      print('✅ [DEBUG] Firebase user authenticated: ${firebaseUser.uid}');
-      print('🔍 [DEBUG] Firebase user email: ${firebaseUser.email}');
-      print('🔍 [DEBUG] Firebase user displayName: ${firebaseUser.displayName}');
-      print('🔍 [DEBUG] Firebase user photoURL: ${firebaseUser.photoURL}');
+    try {
+      print('🔄 [DEBUG] Starting Google sign in with Gmail scopes...');
       
-      try {
-        print('🔄 [DEBUG] Calling API service to sync user...');
-        await ApiService.syncUser(
-          firebaseUid: firebaseUser.uid,
-          email: firebaseUser.email ?? '',
-          fullName: firebaseUser.displayName ?? googleUser.displayName,
-          avatarUrl: firebaseUser.photoURL,
-        );
-        print('✅ [DEBUG] User sync completed successfully');
-      } catch (e) {
-        print('❌ [ERROR] Failed to sync user with backend: $e');
-        // Don't throw here - allow login to continue even if sync fails
+      // ⭐ UPDATED: Add Gmail scopes for email access
+      final GoogleSignIn googleSignIn = GoogleSignIn(
+        scopes: [
+          'email',
+          'profile',
+          'https://www.googleapis.com/auth/gmail.readonly',
+          'https://www.googleapis.com/auth/gmail.modify',
+        ],
+      );
+      
+      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+      
+      if (googleUser == null) {
+        print('❌ [DEBUG] Google sign in cancelled by user');
+        return;
       }
 
-      print('🔄 [DEBUG] Calling onLoginSuccess callback...');
-      onLoginSuccess(
-        firebaseUser.displayName ?? googleUser.displayName ?? "User",
-        firebaseUser.photoURL,
+      print('✅ [DEBUG] Google user obtained: ${googleUser.email}');
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      
+      // Get OAuth tokens
+      final String? accessToken = googleAuth.accessToken;
+      final String? idToken = googleAuth.idToken;
+      
+      print('✅ [DEBUG] Access token obtained: ${accessToken != null}');
+      
+      final credential = GoogleAuthProvider.credential(
+        accessToken: accessToken,
+        idToken: idToken,
       );
-      print('✅ [DEBUG] Login process completed');
-    } else {
-      print('❌ [DEBUG] Firebase user is null after sign in');
+
+      print('🔄 [DEBUG] Signing in with Firebase...');
+      final UserCredential userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
+      final User? firebaseUser = userCredential.user;
+
+      if (firebaseUser != null) {
+        print('✅ [DEBUG] Firebase user authenticated: ${firebaseUser.uid}');
+        
+        try {
+          print('🔄 [DEBUG] Syncing user with backend...');
+          await ApiService.syncUser(
+            firebaseUid: firebaseUser.uid,
+            email: firebaseUser.email ?? '',
+            fullName: firebaseUser.displayName ?? googleUser.displayName,
+            avatarUrl: firebaseUser.photoURL,
+          );
+          print('✅ [DEBUG] User sync completed');
+          
+          // ⭐ NEW: Connect Gmail account with OAuth tokens
+          if (accessToken != null) {
+            print('🔄 [DEBUG] Connecting Gmail account...');
+            try {
+              await ApiService.connectGmail(
+                firebaseUid: firebaseUser.uid,
+                accessToken: accessToken,
+                refreshToken: googleAuth.serverAuthCode, // This might be null, backend handles it
+              );
+              print('✅ [DEBUG] Gmail connected successfully');
+            } catch (e) {
+              print('⚠️ [WARNING] Gmail connection failed: $e');
+              // Don't block login if Gmail connection fails
+            }
+          }
+        } catch (e) {
+          print('❌ [ERROR] Failed to sync user: $e');
+        }
+
+        print('🔄 [DEBUG] Calling onLoginSuccess...');
+        onLoginSuccess(
+          firebaseUser.displayName ?? googleUser.displayName ?? "User",
+          firebaseUser.photoURL,
+        );
+        print('✅ [DEBUG] Login completed');
+      }
+    } catch (e) {
+      print('❌ [ERROR] Login failed: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Login failed: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
-  } catch (e) {
-    print('❌ [ERROR] Login failed: $e');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Login failed: $e')),
-    );
   }
-}
 
   @override
   Widget build(BuildContext context) {

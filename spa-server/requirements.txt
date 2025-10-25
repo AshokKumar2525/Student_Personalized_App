@@ -9,7 +9,16 @@ psycopg2==2.9.11
 PyJWT==2.8.0
 Werkzeug==2.3.7
 requests==2.31.0
+
+# AI Services
 openai==2.5.0
-groq
-mistralai
+groq==0.4.2
+
+# Google APIs
 google-api-python-client==2.97.0
+google-auth==2.23.0
+google-auth-oauthlib==1.1.0
+google-auth-httplib2==0.1.1
+
+# Existing AI (keep if needed)
+mistralai

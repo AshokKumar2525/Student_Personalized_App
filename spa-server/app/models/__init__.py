@@ -54,5 +54,12 @@ __all__ = [
     # NOTIFICATIONS
     # ======================
     "Notification",
-    "UserNotificationPreference"
+    "UserNotificationPreference",
+
+    # ======================
+    # EMAIL SUMMARIZER
+    # ======================
+    "EmailAccount",
+    "Email",
+    "EmailSummary",
 ]

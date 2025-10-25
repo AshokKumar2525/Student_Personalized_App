@@ -26,8 +26,6 @@ class _ModuleContentPageState extends State<ModuleContentPage> {
   Map<String, dynamic>? _moduleData;
   bool _isLoading = true;
   bool _hasAccess = true;
-  // WebViewController? _webViewController;
-  bool _isVideoLoaded = false;
 
   @override
   void initState() {
@@ -53,26 +51,33 @@ class _ModuleContentPageState extends State<ModuleContentPage> {
     try {
       await ApiService.completeModule(widget.moduleId);
       
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Module completed!'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Module completed!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
       
       widget.onModuleCompleted();
       Navigator.pop(context);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to complete module: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to complete module: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
   Widget _buildVideoPlayer(String embedUrl) {
+    // Add parameters to restrict YouTube controls
+    final restrictedUrl = _getRestrictedYouTubeUrl(embedUrl);
+    
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -91,32 +96,33 @@ class _ModuleContentPageState extends State<ModuleContentPage> {
             borderRadius: BorderRadius.circular(12),
             color: Colors.black,
           ),
-          child: Builder(
-            builder: (context) {
-              final controller = WebViewController()
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: WebViewWidget(
+              controller: WebViewController()
                 ..setJavaScriptMode(JavaScriptMode.unrestricted)
-                ..setNavigationDelegate(
-                  NavigationDelegate(
-                    onPageFinished: (url) {
-                      if (url == embedUrl) {
-                        setState(() => _isVideoLoaded = true);
-                      }
-                    },
-                  ),
-                )
-                ..loadRequest(Uri.parse(embedUrl));
-              // _webViewController = controller;
-              return WebViewWidget(controller: controller);
-            },
+                ..setBackgroundColor(Colors.black)
+                ..loadRequest(Uri.parse(restrictedUrl)),
+            ),
           ),
         ),
-        if (!_isVideoLoaded)
-          const Padding(
-            padding: EdgeInsets.all(16.0),
-            child: Center(child: CircularProgressIndicator()),
-          ),
       ],
     );
+  }
+
+  String _getRestrictedYouTubeUrl(String embedUrl) {
+    // Add YouTube parameters to restrict navigation
+    // rel=0: Don't show related videos from other channels
+    // modestbranding=1: Remove YouTube logo
+    // fs=1: Allow fullscreen
+    // controls=1: Show play/pause controls
+    // disablekb=1: Disable keyboard controls for navigation
+    
+    if (embedUrl.contains('?')) {
+      return '$embedUrl&rel=0&modestbranding=1&fs=1&controls=1&disablekb=1';
+    } else {
+      return '$embedUrl?rel=0&modestbranding=1&fs=1&controls=1&disablekb=1';
+    }
   }
 
   Widget _buildEducationalContent(Map<String, dynamic> content) {
@@ -325,10 +331,13 @@ class _ModuleContentPageState extends State<ModuleContentPage> {
             style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
-          const Text(
-            'Complete the previous module to unlock this content.',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 16, color: Colors.grey),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 32),
+            child: Text(
+              'Complete the previous module to unlock this content.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 16, color: Colors.grey),
+            ),
           ),
           const SizedBox(height: 24),
           ElevatedButton(
@@ -348,7 +357,7 @@ class _ModuleContentPageState extends State<ModuleContentPage> {
     final educationalContent = _moduleData!['educational_content'];
     final resources = _moduleData!['resources'] as List<dynamic>;
     final videoResource = resources.cast<Map<String, dynamic>>().firstWhere(
-      (resource) => resource['type'] == 'video',
+      (resource) => resource['type'] == 'video' && resource['embed_url'] != null,
       orElse: () => <String, dynamic>{},
     );
 
@@ -415,9 +424,12 @@ class _ModuleContentPageState extends State<ModuleContentPage> {
             ),
           ),
 
-          // Video Player
+          // Video Player (if available)
           if (videoResource.isNotEmpty && videoResource['embed_url'] != null)
-            _buildVideoPlayer(videoResource['embed_url']!),
+            Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: _buildVideoPlayer(videoResource['embed_url']!),
+            ),
 
           // Educational Content
           if (educationalContent != null)

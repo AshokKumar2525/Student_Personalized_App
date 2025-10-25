@@ -3,6 +3,7 @@ import 'LoginPage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'pages/career_connect/tech_updates_page.dart';
 import 'pages/learning_path_finder/learning_path_page.dart';
+import 'pages/email_summarizer/email_home_page.dart';
 import 'firebase_options.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -708,6 +709,7 @@ class FeaturesList extends StatelessWidget {
   final List<String> features = const [
     "Tech Updates",
     "Learning Path Finder",
+    "Important Email Summarizer",
     "Body Fitness",
     "Academic Performance",
     "Medicine Related",
@@ -768,10 +770,15 @@ class FeaturesList extends StatelessWidget {
                   context,
                   MaterialPageRoute(builder: (context) => const TechUpdatesPage()),
                 );
-              }else if (features[index] == "Learning Path Finder") {
+              } else if (features[index] == "Learning Path Finder") {
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (context) => const LearningPathPage()),
+                );
+              } else if (features[index] == "Important Email Summarizer") {  // ⭐ NEW
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const EmailHomePage()),
                 );
               }
               // Add other feature navigations here
