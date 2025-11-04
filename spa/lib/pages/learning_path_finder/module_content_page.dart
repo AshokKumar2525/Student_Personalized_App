@@ -102,7 +102,53 @@ class _ModuleContentPageState extends State<ModuleContentPage> {
               controller: WebViewController()
                 ..setJavaScriptMode(JavaScriptMode.unrestricted)
                 ..setBackgroundColor(Colors.black)
-                ..loadRequest(Uri.parse(restrictedUrl)),
+                ..setNavigationDelegate(
+                  NavigationDelegate(
+                    onPageFinished: (String url) {
+                      // Inject CSS to hide YouTube's overlay UI elements
+                    },
+                  ),
+                )
+                ..loadRequest(Uri.parse(restrictedUrl))
+                ..runJavaScript('''
+                  (function() {
+                    var style = document.createElement('style');
+                    style.textContent = `
+                      /* Hide YouTube logo */
+                      .ytp-watermark,
+                      .ytp-youtube-button,
+                      .ytp-chrome-top-buttons,
+
+                      /* Hide watch on YouTube button */
+                      .ytp-title-link,
+                      .ytp-title,
+                      .ytp-chrome-top,
+
+                      /* Hide share button and more options */
+                      .ytp-share-button,
+                      .ytp-share-button-visible,
+
+                      /* Hide info cards and annotations */
+                      .ytp-cards-button,
+                      .ytp-cards-teaser,
+
+                      /* Hide suggested videos overlay */
+                      .ytp-ce-element,
+                      .ytp-endscreen-content,
+
+                      /* Hide YouTube branding on pause */
+                      .ytp-pause-overlay,
+
+                      /* Hide more videos button */
+                      .ytp-show-cards-title {
+                        display: none !important;
+                        visibility: hidden !important;
+                        opacity: 0 !important;
+                      }
+                    `;
+                    document.head.appendChild(style);
+                  })();
+                '''),
             ),
           ),
         ),
@@ -111,17 +157,21 @@ class _ModuleContentPageState extends State<ModuleContentPage> {
   }
 
   String _getRestrictedYouTubeUrl(String embedUrl) {
-    // Add YouTube parameters to restrict navigation
-    // rel=0: Don't show related videos from other channels
-    // modestbranding=1: Remove YouTube logo
+    // Add YouTube parameters to hide unnecessary UI elements
+    // rel=0: Don't show related videos
+    // modestbranding=1: Minimal YouTube branding
     // fs=1: Allow fullscreen
-    // controls=1: Show play/pause controls
-    // disablekb=1: Disable keyboard controls for navigation
+    // controls=2: Show controls when user interacts (cleaner interface)
+    // iv_load_policy=3: Hide annotations
+    // cc_load_policy=1: Show captions if available
+    // playsinline=1: Play inline on mobile
+    // autohide=1: Auto-hide controls
+    // showinfo=0: Hide video title and uploader before playing
     
     if (embedUrl.contains('?')) {
-      return '$embedUrl&rel=0&modestbranding=1&fs=1&controls=1&disablekb=1';
+      return '$embedUrl&rel=0&modestbranding=1&fs=1&controls=2&iv_load_policy=3&cc_load_policy=1&playsinline=1&autohide=1&showinfo=0';
     } else {
-      return '$embedUrl?rel=0&modestbranding=1&fs=1&controls=1&disablekb=1';
+      return '$embedUrl?rel=0&modestbranding=1&fs=1&controls=2&iv_load_policy=3&cc_load_policy=1&playsinline=1&autohide=1&showinfo=0';
     }
   }
 

@@ -1,12 +1,12 @@
 """
-Learning Path Finder Service - Production Ready
-Handles AI-powered roadmap generation with caching and optimization
+Learning Path Service - Optimized & Production Ready
+Handles roadmap generation with caching, template reuse, and minimal AI calls
 """
 
 import os
 import json
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Any
 from flask import current_app
 from app import db
@@ -15,58 +15,52 @@ from app.models.learning_pathfinder import (
     Course, PathModule, ModuleResource, UserProgress
 )
 from openai import OpenAI
-from groq import Groq
-import requests
+import time
+
+# Import enhanced models
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 class LearningPathService:
-    """Main service for learning path generation and management"""
+    """Optimized service with template caching and minimal API calls"""
     
-    # Cache configuration
-    CACHE_DURATION_DAYS = 30
-    MAX_AI_RETRIES = 2
+    CACHE_ENABLED = True
     
     def __init__(self):
-        self.openai_client = None
-        self.mistral_client = None
         self.groq_client = None
+        self.openai_client = None
         self._initialize_clients()
         
     def _initialize_clients(self):
-            """Initialize AI clients with error handling"""
-            # Initialize Groq
-            groq_key = os.getenv('GROQ_API_KEY')
-            if groq_key:
+        """Initialize AI clients"""
+        groq_key = os.getenv('GROQ_API_KEY')
+        if groq_key:
+            try:
+                # Simple initialization without extra parameters
+                from groq import Groq as GroqClient
+                self.groq_client = GroqClient(api_key=groq_key)
+                print("✅ Groq initialized")
+            except TypeError as e:
+                # Try alternate initialization for older versions
                 try:
-                    self.groq_client = Groq(api_key=groq_key)
-                    print("✅ Groq client initialized")
-                except Exception as e:
-                    print(f"⚠️ Failed to initialize Groq: {e}")
+                    import groq
+                    groq.api_key = groq_key
+                    self.groq_client = groq
+                    print("✅ Groq initialized (legacy mode)")
+                except Exception as e2:
+                    print(f"⚠️ Groq init failed: {e2}")
                     self.groq_client = None
-            
-            # Initialize OpenAI with safe parameters
-            openai_key = os.getenv('OPENAI_API_KEY')
-            if openai_key:
-                try:
-                    # Try modern initialization
-                    self.openai_client = OpenAI(api_key=openai_key)
-                    print("✅ OpenAI client initialized")
-                except TypeError as e:
-                    # Fallback for version compatibility issues
-                    print(f"⚠️ OpenAI init error: {e}")
-                    try:
-                        # Try simpler initialization
-                        import openai
-                        openai.api_key = openai_key
-                        self.openai_client = openai
-                        print("✅ OpenAI client initialized (legacy mode)")
-                    except Exception as e2:
-                        print(f"⚠️ Failed to initialize OpenAI: {e2}")
-                        self.openai_client = None
-                except Exception as e:
-                    print(f"⚠️ Failed to initialize OpenAI: {e}")
-                    self.openai_client = None
-
-
+            except Exception as e:
+                print(f"⚠️ Groq init failed: {e}")
+                self.groq_client = None
+        
+        openai_key = os.getenv('OPENAI_API_KEY')
+        if openai_key:
+            try:
+                self.openai_client = OpenAI(api_key=openai_key)
+                print("✅ OpenAI initialized")
+            except Exception as e:
+                print(f"⚠️ OpenAI init failed: {e}")
     
     def generate_learning_path(
         self,
@@ -78,10 +72,7 @@ class LearningPathService:
         learning_pace: str
     ) -> Dict[str, Any]:
         """
-        Generate a complete learning path for a user
-        
-        Returns:
-            Dict with path_id, domain, and roadmap data
+        Generate learning path with intelligent caching
         """
         try:
             # 1. Validate inputs
@@ -90,40 +81,73 @@ class LearningPathService:
             # 2. Get or create domain
             domain_obj = self._get_or_create_domain(domain)
             
-            # 3. Check for cached roadmap
-            cache_key = self._generate_cache_key(domain, knowledge_level, familiar_techs)
-            cached_roadmap = self._get_cached_roadmap(cache_key)
+            # 3. Generate template hash for caching
+            template_hash = self._generate_template_hash(
+                domain, knowledge_level, weekly_hours // 5, learning_pace
+            )
             
-            if cached_roadmap:
-                current_app.logger.info(f"Using cached roadmap for {domain}/{knowledge_level}")
-                roadmap_data = cached_roadmap
+            # 4. Check for cached template in database
+            from app.models.roadmap_templates import RoadmapTemplate
+            cached_template = None
+            
+            if self.CACHE_ENABLED:
+                cached_template = RoadmapTemplate.query.filter_by(
+                    template_hash=template_hash
+                ).first()
+                
+                if cached_template:
+                    print(f"✅ Using cached template (used {cached_template.usage_count} times)")
+                    cached_template.increment_usage()
+                    db.session.commit()
+                    roadmap_data = cached_template.roadmap_data
+                else:
+                    print("🔄 Generating new roadmap template...")
+                    roadmap_data = self._generate_roadmap_with_ai(
+                        domain, knowledge_level, familiar_techs, weekly_hours, learning_pace
+                    )
+                    
+                    # Cache the new template
+                    new_template = RoadmapTemplate(
+                        template_hash=template_hash,
+                        domain_id=domain_obj.id,
+                        knowledge_level=knowledge_level,
+                        learning_pace=learning_pace,
+                        weekly_hours_range=f"{(weekly_hours // 5) * 5}-{((weekly_hours // 5) + 1) * 5}",
+                        roadmap_data=roadmap_data,
+                        usage_count=1
+                    )
+                    db.session.add(new_template)
+                    db.session.commit()
+                    print("✅ Template cached for future use")
             else:
-                # 4. Generate new roadmap using AI
                 roadmap_data = self._generate_roadmap_with_ai(
                     domain, knowledge_level, familiar_techs, weekly_hours, learning_pace
                 )
-                
-                # 5. Cache the generated roadmap
-                self._cache_roadmap(cache_key, roadmap_data)
             
-            # 6. Create or update user profile
+            # 5. Create user profile
             profile = self._create_or_update_profile(
                 user_id, domain_obj.id, knowledge_level, 
                 familiar_techs, weekly_hours, learning_pace
             )
             
-            # 7. Create learning path and structure
+            # 6. Create learning path structure
             learning_path = self._create_learning_path_structure(
                 user_id, domain_obj.id, roadmap_data
             )
             
-            # 8. Enhance with real resources
+            # 7. Enhance with YouTube resources (async/background task in production)
             self._enhance_with_resources(learning_path.id, roadmap_data)
+            
+            # 8. Initialize user streak
+            from app.models.enhanced_progress import UserStreak
+            if not UserStreak.query.filter_by(user_id=user_id).first():
+                streak = UserStreak(user_id=user_id)
+                db.session.add(streak)
+            
+            db.session.commit()
             
             # 9. Prepare response
             response_data = self._prepare_response(learning_path, roadmap_data)
-            
-            db.session.commit()
             
             return {
                 'message': 'Learning path generated successfully',
@@ -136,6 +160,12 @@ class LearningPathService:
             db.session.rollback()
             current_app.logger.error(f"Error generating learning path: {str(e)}")
             raise
+    
+    def _generate_template_hash(self, domain: str, level: str, 
+                                 hours_range: int, pace: str) -> str:
+        """Generate hash for template caching (groups similar preferences)"""
+        content = f"{domain}:{level}:{hours_range}:{pace}"
+        return hashlib.md5(content.encode()).hexdigest()
     
     def _validate_inputs(self, domain: str, knowledge_level: str, 
                         weekly_hours: int, learning_pace: str):
@@ -152,28 +182,6 @@ class LearningPathService:
         if not 1 <= weekly_hours <= 40:
             raise ValueError("Weekly hours must be between 1 and 40")
     
-    def _generate_cache_key(self, domain: str, level: str, 
-                           techs: List[str]) -> str:
-        """Generate unique cache key for roadmap"""
-        tech_str = ','.join(sorted(techs)) if techs else ''
-        content = f"{domain}:{level}:{tech_str}"
-        return hashlib.md5(content.encode()).hexdigest()
-    
-    def _get_cached_roadmap(self, cache_key: str) -> Optional[Dict]:
-        """Retrieve cached roadmap if available and not expired"""
-        from app.models.utils import generate_uuid
-        
-        # Check if we have a recent successful generation
-        # This would be stored in a cache table (optional enhancement)
-        # For now, return None to always generate fresh
-        return None
-    
-    def _cache_roadmap(self, cache_key: str, roadmap_data: Dict):
-        """Cache generated roadmap for reuse"""
-        # Optional: Store in Redis or database cache table
-        # For production, implement Redis caching
-        pass
-    
     def _generate_roadmap_with_ai(
         self,
         domain: str,
@@ -182,32 +190,45 @@ class LearningPathService:
         weekly_hours: int,
         learning_pace: str
     ) -> Dict[str, Any]:
-        """Generate roadmap using AI with fallback strategy"""
+        """Generate roadmap using AI with fallback to templates"""
         
         prompt = self._build_roadmap_prompt(
             domain, knowledge_level, familiar_techs, weekly_hours, learning_pace
         )
         
-        # Try OpenAI first (best quality)
-        if self.openai_client:
-            try:
-                roadmap = self._call_openai(prompt)
-                if roadmap and self._validate_roadmap_structure(roadmap):
-                    return roadmap
-            except Exception as e:
-                current_app.logger.warning(f"OpenAI failed: {str(e)}")
-        
-        # Fallback to Groq (fast and reliable)
+        # Try Groq first (fast and free)
+        is_groq_failed = False
         if self.groq_client:
             try:
                 roadmap = self._call_groq(prompt)
+                print("roadmap from groq : \n", roadmap)
                 if roadmap and self._validate_roadmap_structure(roadmap):
                     return roadmap
+                elif roadmap:
+                    print("⚠️ Groq returned invalid structure")
+                else:
+                    print("⚠️ Groq returned no roadmap")
             except Exception as e:
-                current_app.logger.warning(f"Groq failed: {str(e)}")
+                print(f"⚠️ Groq failed: {e}")
+                is_groq_failed = True
         
-        # Final fallback: structured template
-        current_app.logger.warning("All AI providers failed, using template")
+        # Fallback to OpenAI
+        if self.openai_client and is_groq_failed:
+            try:
+                roadmap = self._call_openai(prompt)
+                print("roadmap from groq : \n", roadmap)
+                if roadmap and self._validate_roadmap_structure(roadmap):
+                    return roadmap
+                elif roadmap:
+                    print("⚠️ Groq returned invalid structure")
+                else:
+                    print("⚠️ Groq returned no roadmap")
+            except Exception as e:
+                print(f"⚠️ Groq failed: {e}")
+                is_groq_failed = True
+        
+        # Final fallback: template
+        print("⚠️ Using template fallback")
         return self._generate_template_roadmap(domain, knowledge_level)
     
     def _build_roadmap_prompt(
@@ -222,7 +243,7 @@ class LearningPathService:
         
         tech_context = f"Already familiar with: {', '.join(techs)}" if techs else "Complete beginner"
         
-        return f"""Create a comprehensive learning roadmap for {domain} development.
+        return f"""Create a comprehensive {domain} learning roadmap.
 
 Student Profile:
 - Level: {level}
@@ -231,29 +252,29 @@ Student Profile:
 - Learning pace: {pace}
 
 Requirements:
-1. Create exactly 6 courses
-2. Each course must have 6-8 modules
-3. Progressive difficulty (beginner → advanced)
-4. Include practical projects
-5. Estimated time for each module (in minutes)
+1. Create EXACTLY 6-10 courses (NO MORE, NO LESS)
+2. Each course must have 6-7 modules
+3. Progressive difficulty
+4. Include practical examples
+5. Estimated time for each module (60-180 minutes)
 
-Return ONLY valid JSON with this EXACT structure:
+Return ONLY valid JSON with this structure:
 {{
   "domain": "{domain}",
   "level": "{level}",
   "estimated_completion": "X weeks",
   "courses": [
     {{
-      "title": "Course title",
+      "title": "Course Title",
       "description": "Brief description",
       "order": 1,
       "estimated_time": 600,
       "modules": [
         {{
-          "title": "Module title",
+          "title": "Module Title",
           "description": "What students learn",
           "order": 1,
-          "estimated_time": 90,
+          "estimated_time": 120,
           "key_concepts": ["Concept 1", "Concept 2"],
           "resources": [
             {{
@@ -268,37 +289,12 @@ Return ONLY valid JSON with this EXACT structure:
   ]
 }}
 
-CRITICAL: Return complete, valid JSON only. No markdown, no explanations."""
-    
-    def _call_openai(self, prompt: str) -> Optional[Dict]:
-        """Call OpenAI API with retry logic"""
-        try:
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",  # Cost-effective model
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are an expert curriculum designer. Return only valid JSON."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=0.7,
-                max_tokens=4000,
-                response_format={"type": "json_object"}
-            )
-            
-            content = response.choices[0].message.content
-            return json.loads(content)
-            
-        except Exception as e:
-            current_app.logger.error(f"OpenAI error: {str(e)}")
-            return None
+CRITICAL: Return complete, valid JSON only. No markdown."""
     
     def _call_groq(self, prompt: str) -> Optional[Dict]:
-        """Call Groq API with retry logic"""
+        """Call Groq API"""
+        print("🔄 Calling Groq API...")
+        start_time = time.time()
         try:
             response = self.groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
@@ -313,12 +309,15 @@ CRITICAL: Return complete, valid JSON only. No markdown, no explanations."""
                     }
                 ],
                 temperature=0.7,
-                max_tokens=4000
+                max_tokens=8000,
+                timeout=30
             )
             
+            elapsed_time = time.time() - start_time
+            print(f"⏱️ Groq response time: {elapsed_time:.2f} seconds")
             content = response.choices[0].message.content.strip()
             
-            # Clean markdown code blocks if present
+            # Clean markdown
             if content.startswith('```json'):
                 content = content[7:]
             if content.startswith('```'):
@@ -326,14 +325,44 @@ CRITICAL: Return complete, valid JSON only. No markdown, no explanations."""
             if content.endswith('```'):
                 content = content[:-3]
             
+            print("✅ Groq response parsed successfully")
+            print("the content from groq response is : ", content)
             return json.loads(content.strip())
+        except Exception as e:
+            print(f"Groq error: {e}")
+            return None
+    
+    def _call_openai(self, prompt: str) -> Optional[Dict]:
+        """Call OpenAI API"""
+        print("🔄 Calling OpenAI API...")
+        try:
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert curriculum designer. Return only valid JSON."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.7,
+                max_tokens=5000,
+                response_format={"type": "json_object"}
+            )
+            
+            content = response.choices[0].message.content
+            print("✅ OpenAI response parsed successfully")
+            return json.loads(content)
             
         except Exception as e:
-            current_app.logger.error(f"Groq error: {str(e)}")
+            print(f"OpenAI error: {e}")
             return None
     
     def _validate_roadmap_structure(self, roadmap: Dict) -> bool:
-        """Validate roadmap has required structure"""
+        """Validate roadmap structure"""
         if not isinstance(roadmap, dict):
             return False
         
@@ -353,13 +382,9 @@ CRITICAL: Return complete, valid JSON only. No markdown, no explanations."""
         return True
     
     def _generate_template_roadmap(self, domain: str, level: str) -> Dict:
-        """Generate template-based roadmap as final fallback"""
-        
-        # Import template generator
+        """Generate template-based roadmap"""
         from app.services.roadmap_templates import get_domain_template
-        
-        template = get_domain_template(domain, level)
-        return template
+        return get_domain_template(domain, level)
     
     def _get_or_create_domain(self, domain_name: str) -> Domain:
         """Get existing domain or create new one"""
@@ -441,7 +466,7 @@ CRITICAL: Return complete, valid JSON only. No markdown, no explanations."""
             db.session.add(course)
             db.session.flush()
             
-            # Create modules for this course
+            # Create modules
             modules_data = course_data.get('modules', [])
             for module_data in modules_data:
                 module = PathModule(
@@ -456,7 +481,7 @@ CRITICAL: Return complete, valid JSON only. No markdown, no explanations."""
                 db.session.add(module)
                 db.session.flush()
                 
-                # Create initial progress record
+                # Create progress record
                 progress = UserProgress(
                     user_id=user_id,
                     module_id=module.id,
@@ -467,12 +492,12 @@ CRITICAL: Return complete, valid JSON only. No markdown, no explanations."""
                 db.session.add(progress)
                 
                 # Add placeholder resources
-                for resource_data in module_data.get('resources', []):
+                for resource_data in module_data.get('resources', [])[:2]:  # Limit to 2
                     resource = ModuleResource(
                         module_id=module.id,
                         title=resource_data.get('title', 'Resource'),
-                        url='https://example.com/placeholder',
-                        type=resource_data.get('type', 'documentation'),
+                        url='https://www.youtube.com/results?search_query=' + module_data['title'].replace(' ', '+'),
+                        type=resource_data.get('type', 'video'),
                         difficulty=resource_data.get('difficulty', 'beginner'),
                         created_at=datetime.utcnow()
                     )
@@ -481,38 +506,15 @@ CRITICAL: Return complete, valid JSON only. No markdown, no explanations."""
         return learning_path
     
     def _enhance_with_resources(self, path_id: int, roadmap_data: Dict):
-        """Enhance modules with real YouTube videos and resources"""
-        
-        youtube_service = YouTubeResourceService()
-        
-        # Get all modules for this path
-        modules = PathModule.query.filter_by(path_id=path_id).all()
-        
-        for module in modules:
-            # Get 2 YouTube videos for each module
-            videos = youtube_service.search_videos(module.title, max_results=2)
-            
-            if videos:
-                # Delete placeholder resources
-                ModuleResource.query.filter_by(module_id=module.id).delete()
-                
-                # Add real video resources
-                for idx, video in enumerate(videos):
-                    resource = ModuleResource(
-                        module_id=module.id,
-                        title=video['title'],
-                        url=video['url'],
-                        type='video',
-                        difficulty='beginner' if idx == 0 else 'intermediate',
-                        created_at=datetime.utcnow()
-                    )
-                    db.session.add(resource)
+        """Enhance modules with real resources (can be async in production)"""
+        # This is a placeholder - in production, use background tasks
+        # For now, we use search links which are faster than API calls
+        pass
     
     def _prepare_response(self, learning_path: LearningPath, 
                          roadmap_data: Dict) -> Dict:
         """Prepare final response data"""
         
-        # Get all courses with modules
         courses = Course.query.filter_by(path_id=learning_path.id)\
             .order_by(Course.order).all()
         
@@ -565,73 +567,3 @@ CRITICAL: Return complete, valid JSON only. No markdown, no explanations."""
             'total_modules': total_modules,
             'courses': courses_response
         }
-
-
-class YouTubeResourceService:
-    """Service for fetching YouTube resources"""
-    
-    def __init__(self):
-        self.api_key = os.getenv('YOUTUBE_API_KEY')
-        self.base_url = "https://www.googleapis.com/youtube/v3/search"
-    
-    def search_videos(self, query: str, max_results: int = 3) -> List[Dict]:
-        """Search for educational YouTube videos"""
-        
-        if not self.api_key:
-            return self._get_fallback_videos(query)
-        
-        try:
-            params = {
-                'part': 'snippet',
-                'q': f"{query} tutorial programming",
-                'type': 'video',
-                'maxResults': max_results,
-                'key': self.api_key,
-                'videoDuration': 'medium',
-                'videoDefinition': 'high',
-                'relevanceLanguage': 'en'
-            }
-            
-            response = requests.get(self.base_url, params=params, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                return self._process_youtube_results(data.get('items', []))
-            else:
-                return self._get_fallback_videos(query)
-                
-        except Exception as e:
-            current_app.logger.error(f"YouTube API error: {str(e)}")
-            return self._get_fallback_videos(query)
-    
-    def _process_youtube_results(self, items: List[Dict]) -> List[Dict]:
-        """Process YouTube API results"""
-        videos = []
-        
-        for item in items:
-            video_id = item['id']['videoId']
-            snippet = item['snippet']
-            
-            videos.append({
-                'title': snippet['title'],
-                'url': f"https://www.youtube.com/watch?v={video_id}",
-                'embed_url': f"https://www.youtube.com/embed/{video_id}",
-                'thumbnail': snippet['thumbnails']['high']['url'],
-                'channel': snippet['channelTitle']
-            })
-        
-        return videos
-    
-    def _get_fallback_videos(self, query: str) -> List[Dict]:
-        """Return generic search link as fallback"""
-        search_query = query.replace(' ', '+')
-        
-        return [
-            {
-                'title': f'{query} - Tutorial',
-                'url': f'https://www.youtube.com/results?search_query={search_query}+tutorial',
-                'embed_url': None,
-                'thumbnail': None,
-                'channel': 'YouTube Search'
-            }
-        ]

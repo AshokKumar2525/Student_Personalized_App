@@ -24,8 +24,8 @@ def serve_avatar(filename):
 def sync_user():
     try:
         data = request.get_json()
-        print(f"🔍 [BACKEND DEBUG] Received sync-user request")
-        print(f"🔍 [BACKEND DEBUG] Request data: {data}")
+        # print(f"🔍 [BACKEND DEBUG] Received sync-user request")
+        # print(f"🔍 [BACKEND DEBUG] Request data: {data}")
         
         if not data:
             print("❌ [BACKEND DEBUG] No data received")
@@ -34,8 +34,8 @@ def sync_user():
         firebase_uid = data.get('firebase_uid')
         email = data.get('email')
         
-        print(f"🔍 [BACKEND DEBUG] Firebase UID: {firebase_uid}")
-        print(f"🔍 [BACKEND DEBUG] Email: {email}")
+        # print(f"🔍 [BACKEND DEBUG] Firebase UID: {firebase_uid}")
+        # print(f"🔍 [BACKEND DEBUG] Email: {email}")
         
         if not firebase_uid:
             print("❌ [BACKEND DEBUG] Missing firebase_uid")
@@ -50,92 +50,82 @@ def sync_user():
         
         avatar_url = data.get('avatar_url')
         
-        # If avatar_url is from Google (external URL), download and save locally
-        if avatar_url and avatar_url.startswith('http') and 'google' in avatar_url:
-            try:
-                print(f"🔄 [BACKEND DEBUG] Downloading Google avatar...")
-                import requests
-                from io import BytesIO
+        # # If avatar_url is from Google (external URL), download and save locally
+        # if avatar_url and avatar_url.startswith('http') and 'google' in avatar_url:
+        #     try:
+        #         print(f"🔄 [BACKEND DEBUG] Downloading Google avatar...")
+        #         import requests
+        #         from io import BytesIO
                 
-                response = requests.get(avatar_url)
-                if response.status_code == 200:
-                    # Create uploads directory if it doesn't exist
-                    upload_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'avatars')
-                    os.makedirs(upload_dir, exist_ok=True)
+        #         response = requests.get(avatar_url, timeout=5)
+        #         if response.status_code == 200:
+        #             # Create uploads directory if it doesn't exist
+        #             upload_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'avatars')
+        #             os.makedirs(upload_dir, exist_ok=True)
                     
-                    # Generate unique filename
-                    file_extension = 'jpg'  # Google avatars are typically JPG
-                    filename = f"{firebase_uid}_google_{uuid.uuid4().hex}.{file_extension}"
-                    filepath = os.path.join(upload_dir, filename)
+        #             # Generate unique filename
+        #             file_extension = 'jpg'  # Google avatars are typically JPG
+        #             filename = f"{firebase_uid}_google_{uuid.uuid4().hex}.{file_extension}"
+        #             filepath = os.path.join(upload_dir, filename)
                     
-                    # Save the image
-                    with open(filepath, 'wb') as f:
-                        f.write(response.content)
+        #             # Save the image
+        #             with open(filepath, 'wb') as f:
+        #                 f.write(response.content)
                     
-                    # Update avatar_url to local path
-                    avatar_url = f"/static/uploads/avatars/{filename}"
-                    print(f"✅ [BACKEND DEBUG] Google avatar saved locally: {avatar_url}")
+        #             # Update avatar_url to local path
+        #             avatar_url = f"/static/uploads/avatars/{filename}"
+        #             print(f"✅ [BACKEND DEBUG] Google avatar saved locally: {avatar_url}")
                     
-            except Exception as e:
-                print(f"❌ [BACKEND ERROR] Failed to download Google avatar: {str(e)}")
-                # Keep the original Google URL if download fails
-                pass
+        #     except Exception as e:
+        #         print(f"❌ [BACKEND ERROR] Failed to download Google avatar: {str(e)}")
+        #         # Keep the original Google URL if download fails
+        #         pass
         
         if not user:
-            print("🔄 [BACKEND DEBUG] Creating new user...")
-            
+            print(f"[BACKEND DEBUG] Creating new user...")
             user = User(
                 id=firebase_uid,
                 email=email,
-                full_name=data.get('full_name'),
-                avatar_url=avatar_url
+                full_name=data.get('fullName'),
+                avatar_url=avatar_url  # Use URL directly
             )
             db.session.add(user)
             db.session.commit()
-            print(f"✅ [BACKEND DEBUG] User created: {user.id}")
-            
             return jsonify({
                 'message': 'User created successfully',
                 'user': {
                     'id': user.id,
                     'email': user.email,
-                    'full_name': user.full_name,
-                    'avatar_url': user.avatar_url
+                    'fullname': user.fullname,
+                    'avatarurl': user.avatar_url
                 }
             }), 201
         else:
-            print("🔄 [BACKEND DEBUG] Updating existing user...")
-            # Update existing user if needed
+            # Update existing user
             update_fields = False
-            
-            if data.get('full_name') and data.get('full_name') != user.full_name:
-                user.full_name = data.get('full_name')
+            if data.get('fullName') and data.get('fullName') != user.fullname:
+                user.fullname = data.get('fullName')
                 update_fields = True
             
-            # Always update avatar if provided (replace previous one)
             if avatar_url and avatar_url != user.avatar_url:
                 user.avatar_url = avatar_url
                 update_fields = True
-                print(f"✅ [BACKEND DEBUG] Updated user avatar to: {avatar_url}")
             
             if update_fields:
                 db.session.commit()
-                print(f"✅ [BACKEND DEBUG] User updated: {user.id}")
             
             return jsonify({
                 'message': 'User already exists',
                 'user': {
                     'id': user.id,
                     'email': user.email,
-                    'full_name': user.full_name,
-                    'avatar_url': user.avatar_url
+                    'fullname': user.fullname,
+                    'avatarurl': user.avatar_url
                 }
             }), 200
             
     except Exception as e:
-        print(f"❌ [BACKEND ERROR] Exception in sync-user: {str(e)}")
-        import traceback
-        print(f"❌ [BACKEND ERROR] Traceback: {traceback.format_exc()}")
+        print(f"[BACKEND ERROR] Exception in sync-user: {str(e)}")
         db.session.rollback()
         return jsonify({'error': f'Failed to sync user: {str(e)}'}), 500
 

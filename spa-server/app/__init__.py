@@ -43,7 +43,16 @@ def create_app():
         from app.models.learning_pathfinder import (
             UserProfile, LearningPath, PathModule, ModuleResource, UserProgress,
             LearningActivity, ActivitySubmission, Badge, UserBadge, UserPoints,
-            ForumPost, ForumReply, TechUpdate, RoadmapVersion, VersionedModule, UpdateFeedback
+            ForumPost, ForumReply, TechUpdate, RoadmapVersion, VersionedModule, UpdateFeedback,
+            Course
+        )
+        
+        # Import NEW enhanced learning path models
+        from app.models.roadmap_templates import (
+            RoadmapTemplate, ModuleFeedback, CourseFeedback
+        )
+        from app.models.enhanced_progress import (
+            LearningSession, UserStreak, RoadmapCache
         )
 
         # Import and register blueprints

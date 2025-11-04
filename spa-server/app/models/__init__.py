@@ -35,6 +35,17 @@ __all__ = [
     "VersionedModule",
     "UpdateFeedback",
 
+    # Course Structure
+    "Course",
+
+    # NEW: Enhanced Learning Path Features
+    "RoadmapTemplate",
+    "ModuleFeedback",
+    "CourseFeedback",
+    "LearningSession",
+    "UserStreak",
+    "RoadmapCache",
+
     # ======================
     # FINANCE TRACKER
     # ======================
