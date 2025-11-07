@@ -67,7 +67,10 @@ class _ModuleContentPageState extends State<ModuleContentPage> with SingleTicker
         widget.moduleId,
         _moduleData?['current_progress'] ?? 'in_progress',
         durationMinutes: duration,
-      ).catchError((e) => print('Failed to track time: $e'));
+      ).catchError((e) {
+        print('Failed to track time: $e');
+        return <String, dynamic>{};
+      });
     }
   }
 
