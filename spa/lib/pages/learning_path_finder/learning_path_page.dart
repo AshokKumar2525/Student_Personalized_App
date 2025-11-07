@@ -172,60 +172,62 @@ class _LearningPathPageState extends State<LearningPathPage> {
   }
 }
 
-  void _startNewPath() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Start New Learning Path?'),
-        content: const Text(
-          'This will reset your progress. This action cannot be undone.',
+  // In learning_path_page.dart, update the _startNewPath method:
+
+void _startNewPath() {
+  showDialog(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Start New Learning Path?'),
+      content: const Text(
+        'This will reset your progress. This action cannot be undone.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
+        ElevatedButton(
+          onPressed: () async {
+            Navigator.pop(context); // Close dialog first
+            
+            try {
+              await ApiService.resetLearningPath();
               
-              try {
-                await ApiService.resetLearningPath();
-                
+              if (mounted) {
                 setState(() {
                   _hasExistingPath = false;
                   _roadmapData = null;
                 });
                 
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Learning path reset'),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Failed: $e'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Learning path reset'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
               }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Reset'),
+            } catch (e) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Failed to reset: $e'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            }
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.red,
+            foregroundColor: Colors.white,
           ),
-        ],
-      ),
-    );
-  }
+          child: const Text('Reset'),
+        ),
+      ],
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {

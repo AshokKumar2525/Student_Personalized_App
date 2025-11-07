@@ -4,6 +4,7 @@ from flask_cors import CORS
 from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
 import os
+from app.services.gemini_content_service import get_enhanced_gemini_service
 
 # Initialize extensions
 db = SQLAlchemy()
@@ -27,6 +28,12 @@ def create_app():
         jwt.init_app(app)
         CORS(app, resources={r"/*": {"origins": "*"}})
 
+        try:
+            # Initialize Gemini AI service
+            get_enhanced_gemini_service()
+        except Exception as e:
+            print(f"⚠️ Gemini AI service not available: {e}")
+
         # Import models to ensure they are registered with SQLAlchemy
         # Import order matters to avoid circular dependencies
         from app.models import utils
@@ -35,6 +42,7 @@ def create_app():
         from app.models.finance_tracker import Transaction, Budget, FinanceSetting
         from app.models.scholarships import Scholarship, ScholarshipCriteria, UserScholarshipPreference, user_saved_scholarships
         from app.models.notifications import Notification, UserNotificationPreference
+        
         
         # Import email summarizer models
         from app.models.email_summarizer import EmailAccount, Email, EmailSummary
@@ -54,6 +62,7 @@ def create_app():
         from app.models.enhanced_progress import (
             LearningSession, UserStreak, RoadmapCache
         )
+        from app.models.module_ai_content_cache import ModuleAIContentCache
 
         # Import and register blueprints
         from app.routes.auth_routes import auth_bp

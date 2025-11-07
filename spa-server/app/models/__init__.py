@@ -45,6 +45,7 @@ __all__ = [
     "LearningSession",
     "UserStreak",
     "RoadmapCache",
+    'ModuleAIContentCache',
 
     # ======================
     # FINANCE TRACKER

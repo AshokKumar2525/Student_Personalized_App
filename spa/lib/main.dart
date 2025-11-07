@@ -686,7 +686,17 @@ class QuickActionsRow extends StatelessWidget {
                   iconSize: 32,
                   padding: const EdgeInsets.all(16),
                   icon: Icon(action["icon"] as IconData, color: Colors.white),
-                  onPressed: () {},
+                  onPressed: () {
+                    // Navigate to the email page when "Check Mail" is tapped.
+                    if (action["label"] == "Check Mail") {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const EmailHomePage()),
+                      );
+                    } else {
+                      // implement other quick actions here
+                    }
+                  },
                 ),
               ),
               const SizedBox(height: 8),
@@ -715,7 +725,6 @@ class FeaturesList extends StatelessWidget {
     "Medicine Related",
     "English Communication",
     "Scholarship Related",
-    "Important Email Summarizer",
     "Financial Expense Tracker",
     "Discover",
   ];
@@ -775,7 +784,7 @@ class FeaturesList extends StatelessWidget {
                   context,
                   MaterialPageRoute(builder: (context) => const LearningPathPage()),
                 );
-              } else if (features[index] == "Important Email Summarizer") {  // ⭐ NEW
+              } else if (features[index] == "Important Email Summarizer") {
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (context) => const EmailHomePage()),

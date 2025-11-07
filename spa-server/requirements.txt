@@ -13,6 +13,7 @@ requests==2.31.0
 # AI Services
 openai==2.5.0
 groq==0.33.0
+google-generativeai==0.3.2
 
 # Google APIs
 google-api-python-client==2.97.0

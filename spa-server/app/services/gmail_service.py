@@ -1,19 +1,18 @@
 """
-Gmail Service - Handle Gmail API operations
+Gmail Service - Handle Gmail API operations with proper OAuth2 refresh
 """
 
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from datetime import datetime, timedelta
 import base64
-import email
-from email.mime.text import MIMEText
 import os
 
 
 class GmailService:
-    """Service for interacting with Gmail API"""
+    """Service for interacting with Gmail API with auto-refresh"""
     
     SCOPES = [
         'https://www.googleapis.com/auth/gmail.readonly',
@@ -26,17 +25,45 @@ class GmailService:
         
         Args:
             access_token: Google access token
-            refresh_token: Google refresh token (optional)
+            refresh_token: Google refresh token (REQUIRED for auto-refresh)
         """
+        # Get OAuth2 credentials from environment
+        client_id = os.getenv('GOOGLE_CLIENT_ID')
+        client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+        
+        if not client_id or not client_secret:
+            raise ValueError("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set in environment")
+        
+        # Create credentials with all required fields
         self.credentials = Credentials(
             token=access_token,
             refresh_token=refresh_token,
             token_uri='https://oauth2.googleapis.com/token',
-            client_id=os.getenv('GOOGLE_CLIENT_ID'),
-            client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
+            client_id=client_id,
+            client_secret=client_secret,
             scopes=self.SCOPES
         )
+        
+        # Refresh token if expired
+        if self.credentials.expired and self.credentials.refresh_token:
+            try:
+                self.credentials.refresh(Request())
+                print("✅ Token refreshed successfully")
+            except Exception as e:
+                print(f"⚠️ Token refresh failed: {e}")
+        
         self.service = build('gmail', 'v1', credentials=self.credentials)
+        self.updated_token = None
+    
+    def get_updated_credentials(self):
+        """Get updated token if it was refreshed"""
+        if self.credentials.token != self.updated_token:
+            return {
+                'access_token': self.credentials.token,
+                'refresh_token': self.credentials.refresh_token,
+                'token_expiry': self.credentials.expiry.isoformat() if self.credentials.expiry else None
+            }
+        return None
     
     def get_user_email(self):
         """Get the authenticated user's email address"""
@@ -94,20 +121,13 @@ class GmailService:
             raise
     
     def _get_message_details(self, message_id):
-        """
-        Get detailed information about a specific email
-        
-        Args:
-            message_id: Gmail message ID
-        
-        Returns:
-            dict: Email details
-        """
+        """Get detailed information about a specific email"""
         try:
             message = self.service.users().messages().get(
                 userId='me',
                 id=message_id,
-                format='full'
+                format='metadata',  # Only get metadata for efficiency
+                metadataHeaders=['Subject', 'From', 'Date']
             ).execute()
             
             # Extract headers
@@ -129,9 +149,11 @@ class GmailService:
             labels = message.get('labelIds', [])
             is_read = 'UNREAD' not in labels
             is_starred = 'STARRED' in labels
+            is_important = 'IMPORTANT' in labels
             
             # Check for attachments
-            has_attachments = self._has_attachments(message['payload'])
+            size_estimate = message.get('sizeEstimate', 0)
+            has_attachments = size_estimate > 10000  # Rough estimate
             
             # Get thread ID
             thread_id = message.get('threadId')
@@ -139,13 +161,14 @@ class GmailService:
             return {
                 'message_id': message_id,
                 'thread_id': thread_id,
-                'subject': subject,
+                'subject': subject or '(No subject)',
                 'sender_name': sender_name,
                 'sender_email': sender_email,
                 'snippet': snippet,
                 'email_date': email_date,
                 'is_read': is_read,
                 'is_starred': is_starred,
+                'is_important': is_important,
                 'has_attachments': has_attachments,
                 'labels': labels
             }
@@ -155,15 +178,7 @@ class GmailService:
             return None
     
     def get_message_body(self, message_id):
-        """
-        Get full email body (for summarization)
-        
-        Args:
-            message_id: Gmail message ID
-        
-        Returns:
-            dict: {'text': '...', 'html': '...'}
-        """
+        """Get full email body (for summarization)"""
         try:
             message = self.service.users().messages().get(
                 userId='me',
@@ -180,17 +195,7 @@ class GmailService:
             if 'parts' in payload:
                 # Multipart message
                 for part in payload['parts']:
-                    mime_type = part.get('mimeType')
-                    body = part.get('body', {})
-                    data = body.get('data', '')
-                    
-                    if data:
-                        decoded = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
-                        
-                        if mime_type == 'text/plain':
-                            body_text += decoded
-                        elif mime_type == 'text/html':
-                            body_html += decoded
+                    body_text, body_html = self._extract_part_body(part, body_text, body_html)
             else:
                 # Single part message
                 body = payload.get('body', {})
@@ -206,13 +211,34 @@ class GmailService:
                         body_html = decoded
             
             return {
-                'text': body_text,
-                'html': body_html
+                'text': body_text.strip(),
+                'html': body_html.strip()
             }
         
         except HttpError as error:
             print(f"Error getting message body: {error}")
             raise
+    
+    def _extract_part_body(self, part, body_text='', body_html=''):
+        """Recursively extract body from message parts"""
+        mime_type = part.get('mimeType')
+        body = part.get('body', {})
+        data = body.get('data', '')
+        
+        if data:
+            decoded = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+            
+            if mime_type == 'text/plain':
+                body_text += decoded
+            elif mime_type == 'text/html':
+                body_html += decoded
+        
+        # Recursively check nested parts
+        if 'parts' in part:
+            for nested_part in part['parts']:
+                body_text, body_html = self._extract_part_body(nested_part, body_text, body_html)
+        
+        return body_text, body_html
     
     def mark_as_read(self, message_id):
         """Mark an email as read"""
@@ -258,6 +284,18 @@ class GmailService:
             print(f"Error toggling star: {error}")
             return False
     
+    def delete_message(self, message_id):
+        """Move message to trash"""
+        try:
+            self.service.users().messages().trash(
+                userId='me',
+                id=message_id
+            ).execute()
+            return True
+        except HttpError as error:
+            print(f"Error deleting message: {error}")
+            return False
+    
     def get_history_id(self):
         """Get current history ID for incremental sync"""
         try:
@@ -277,11 +315,7 @@ class GmailService:
         return ''
     
     def _parse_sender(self, sender_str):
-        """
-        Parse sender string into name and email
-        
-        Example: "John Doe <john@example.com>" -> ("John Doe", "john@example.com")
-        """
+        """Parse sender string into name and email"""
         if not sender_str:
             return ('', '')
         
@@ -302,19 +336,112 @@ class GmailService:
             return parsedate_to_datetime(date_str)
         except:
             return datetime.utcnow()
-    
-    def _has_attachments(self, payload):
-        """Check if email has attachments"""
-        if 'parts' in payload:
-            for part in payload['parts']:
-                if part.get('filename'):
-                    return True
-                if 'parts' in part:
-                    if self._has_attachments(part):
-                        return True
-        return False
 
 
 def create_gmail_service(access_token, refresh_token=None):
     """Factory function to create GmailService instance"""
     return GmailService(access_token, refresh_token)
+
+"""
+Add these methods to your GmailService class in gmail_service.py
+"""
+
+import re
+
+def get_message_with_attachments(self, message_id):
+    """Get email with attachments and links info"""
+    try:
+        message = self.service.users().messages().get(
+            userId='me',
+            id=message_id,
+            format='full'
+        ).execute()
+        
+        payload = message['payload']
+        
+        # Extract body
+        body_text = ''
+        body_html = ''
+        attachments = []
+        
+        if 'parts' in payload:
+            for part in payload['parts']:
+                body_text, body_html, attachments = self._extract_parts(
+                    part, body_text, body_html, attachments
+                )
+        else:
+            body = payload.get('body', {})
+            data = body.get('data', '')
+            
+            if data:
+                decoded = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+                mime_type = payload.get('mimeType')
+                
+                if mime_type == 'text/plain':
+                    body_text = decoded
+                elif mime_type == 'text/html':
+                    body_html = decoded
+        
+        # Extract links from body
+        links = self._extract_links(body_text + body_html)
+        
+        return {
+            'body': {
+                'text': body_text.strip(),
+                'html': body_html.strip()
+            },
+            'attachments': attachments,
+            'links': links
+        }
+    
+    except HttpError as error:
+        print(f"Error getting message with attachments: {error}")
+        raise
+
+
+def _extract_parts(self, part, body_text='', body_html='', attachments=[]):
+    """Extract body, attachments recursively"""
+    mime_type = part.get('mimeType', '')
+    filename = part.get('filename', '')
+    body = part.get('body', {})
+    data = body.get('data', '')
+    
+    # Check if it's an attachment
+    if filename and body.get('attachmentId'):
+        attachments.append({
+            'filename': filename,
+            'mimeType': mime_type,
+            'size': body.get('size', 0),
+            'attachmentId': body.get('attachmentId')
+        })
+    elif data:
+        # Regular body content
+        decoded = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+        
+        if mime_type == 'text/plain':
+            body_text += decoded
+        elif mime_type == 'text/html':
+            body_html += decoded
+    
+    # Recursively check nested parts
+    if 'parts' in part:
+        for nested_part in part['parts']:
+            body_text, body_html, attachments = self._extract_parts(
+                nested_part, body_text, body_html, attachments
+            )
+    
+    return body_text, body_html, attachments
+
+
+def _extract_links(self, text):
+    """Extract URLs from text"""
+    url_pattern = re.compile(
+        r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+    )
+    
+    links = url_pattern.findall(text)
+    
+    # Remove duplicates and limit to 10
+    unique_links = list(dict.fromkeys(links))[:10]
+    
+    return unique_links

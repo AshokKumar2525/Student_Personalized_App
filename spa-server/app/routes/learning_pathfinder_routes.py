@@ -1,13 +1,15 @@
 """
-Optimized Learning Path Routes
-Includes caching, lazy loading, and progress tracking
+Optimized Learning Path Routes - FIXED CACHING
+Separate caching for roadmaps and module AI content
+NO DUPLICATE ROUTES
 """
 
 from flask import Blueprint, request, jsonify, current_app
 from app import db
 from app.models.learning_pathfinder import (
     UserProfile, LearningPath, PathModule, ModuleResource,
-    UserProgress, Course, Domain
+    UserProgress, Course, Domain,
+    LearningActivity, ForumPost, ForumReply, RoadmapVersion, UserPoints
 )
 from app.models.users import User
 from app.services.learning_path_service import LearningPathService
@@ -18,16 +20,17 @@ import traceback
 # Import enhanced models
 from app.models.enhanced_progress import LearningSession, UserStreak, RoadmapCache
 from app.models.roadmap_templates import ModuleFeedback, CourseFeedback
+from app.models.module_ai_content_cache import ModuleAIContentCache
 
 learning_pathfinder_bp = Blueprint('learning_pathfinder', __name__)
 lp_service = LearningPathService()
 
-# In-memory cache for frequently accessed data
-_cache = {
+# In-memory cache for frequently accessed data (SHORT-TERM)
+_memory_cache = {
     'roadmaps': {},  # user_id: {data, timestamp}
     'modules': {},   # module_id: {data, timestamp}
 }
-CACHE_DURATION = 300  # 5 minutes
+MEMORY_CACHE_DURATION = 300  # 5 minutes
 
 
 def handle_errors(f):
@@ -43,6 +46,24 @@ def handle_errors(f):
             current_app.logger.error(traceback.format_exc())
             return jsonify({'error': 'Internal server error', 'type': 'server_error'}), 500
     return decorated_function
+
+
+@learning_pathfinder_bp.route('/learning-path/test', methods=['GET'])
+def test_endpoint():
+    """Health check"""
+    return jsonify({
+        'message': 'Learning Path Finder API is working!',
+        'status': 'success',
+        'version': '3.0',
+        'features': [
+            'Separate cache systems',
+            'Template caching',
+            'Progress tracking',
+            'Session management',
+            'Streak gamification',
+            'Feedback system'
+        ]
+    }), 200
 
 
 @learning_pathfinder_bp.route('/learning-path/generate-roadmap', methods=['POST'])
@@ -70,9 +91,17 @@ def generate_learning_path():
         learning_pace=data['learning_pace']
     )
     
-    # Clear cache for this user
-    if data['firebase_uid'] in _cache['roadmaps']:
-        del _cache['roadmaps'][data['firebase_uid']]
+    # Clear ALL caches for this user (both memory and database)
+    firebase_uid = data['firebase_uid']
+    
+    # Clear memory cache
+    if firebase_uid in _memory_cache['roadmaps']:
+        del _memory_cache['roadmaps'][firebase_uid]
+    
+    # Clear database cache for roadmaps
+    RoadmapCache.query.filter_by(user_id=firebase_uid).delete(synchronize_session=False)
+    
+    db.session.commit()
     
     return jsonify(result), 201
 
@@ -80,35 +109,45 @@ def generate_learning_path():
 @learning_pathfinder_bp.route('/learning-path/user-roadmap', methods=['GET'])
 @handle_errors
 def get_user_learning_path():
-    """Get user's roadmap with caching"""
+    """
+    Get user's roadmap with SEPARATE caching
+    This ONLY caches complete roadmap data, NOT module AI content
+    """
     firebase_uid = request.args.get('firebase_uid')
     
     if not firebase_uid:
         return jsonify({'error': 'firebase_uid is required'}), 400
     
-    # Check in-memory cache first
-    if firebase_uid in _cache['roadmaps']:
-        cached_data = _cache['roadmaps'][firebase_uid]
-        if datetime.now() - cached_data['timestamp'] < timedelta(seconds=CACHE_DURATION):
-            print("✅ Serving from memory cache")
+    # Check in-memory cache first (fastest)
+    if firebase_uid in _memory_cache['roadmaps']:
+        cached_data = _memory_cache['roadmaps'][firebase_uid]
+        if datetime.now() - cached_data['timestamp'] < timedelta(seconds=MEMORY_CACHE_DURATION):
+            print("✅ [ROADMAP] Serving from memory cache")
             return jsonify(cached_data['data']), 200
     
-    # Check database cache
-    cache_entry = RoadmapCache.query.filter_by(user_id=firebase_uid, is_valid=True).first()
+    # Check database cache (second fastest)
+    cache_entry = RoadmapCache.query.filter_by(
+        user_id=firebase_uid, 
+        is_valid=True
+    ).filter(
+        RoadmapCache.learning_path_id.isnot(None)  # Only roadmap cache, NOT module content
+    ).first()
+    
     if cache_entry:
         import json
-        print("✅ Serving from database cache")
+        print("✅ [ROADMAP] Serving from database cache")
         response_data = json.loads(cache_entry.roadmap_data)
         
         # Update in-memory cache
-        _cache['roadmaps'][firebase_uid] = {
+        _memory_cache['roadmaps'][firebase_uid] = {
             'data': response_data,
             'timestamp': datetime.now()
         }
         
         return jsonify(response_data), 200
     
-    # Fetch fresh data
+    # Fetch fresh data (slowest)
+    print("🔄 [ROADMAP] Fetching fresh data from database")
     learning_path = LearningPath.query.filter_by(user_id=firebase_uid)\
         .order_by(LearningPath.created_at.desc()).first()
     
@@ -175,7 +214,7 @@ def get_user_learning_path():
         'courses': courses_data
     }
     
-    # Cache the response (update if exists, insert if new)
+    # Cache the response in DATABASE (update if exists, insert if new)
     import json
     cache_entry = RoadmapCache.query.filter_by(learning_path_id=learning_path.id).first()
     
@@ -185,10 +224,10 @@ def get_user_learning_path():
         cache_entry.is_valid = True
         cache_entry.updated_at = datetime.now()
     else:
-        # Create new cache
+        # Create new cache - MUST have learning_path_id
         cache_entry = RoadmapCache(
             user_id=firebase_uid,
-            learning_path_id=learning_path.id,
+            learning_path_id=learning_path.id,  # ALWAYS set for roadmap cache
             roadmap_data=json.dumps(response_data),
             is_valid=True
         )
@@ -197,29 +236,30 @@ def get_user_learning_path():
     db.session.commit()
     
     # Update in-memory cache
-    _cache['roadmaps'][firebase_uid] = {
+    _memory_cache['roadmaps'][firebase_uid] = {
         'data': response_data,
         'timestamp': datetime.now()
     }
     
+    print("✅ [ROADMAP] Data cached successfully")
     return jsonify(response_data), 200
 
 
 @learning_pathfinder_bp.route('/learning-path/module-content/<int:module_id>', methods=['GET'])
 @handle_errors
 def get_module_content(module_id):
-    """Get module content with lazy loading"""
+    """Get module content with proper access control"""
     firebase_uid = request.args.get('firebase_uid')
     
     if not firebase_uid:
         return jsonify({'error': 'firebase_uid is required'}), 400
     
-    # Check cache
+    # Check memory cache
     cache_key = f"{firebase_uid}_{module_id}"
-    if cache_key in _cache['modules']:
-        cached_data = _cache['modules'][cache_key]
-        if datetime.now() - cached_data['timestamp'] < timedelta(seconds=CACHE_DURATION):
-            print("✅ Serving module from cache")
+    if cache_key in _memory_cache['modules']:
+        cached_data = _memory_cache['modules'][cache_key]
+        if datetime.now() - cached_data['timestamp'] < timedelta(seconds=MEMORY_CACHE_DURATION):
+            print("✅ [MODULE] Serving from memory cache")
             return jsonify(cached_data['data']), 200
     
     module = PathModule.query.get(module_id)
@@ -235,21 +275,29 @@ def get_module_content(module_id):
         module_id=module_id
     ).first()
     
-    # Check if previous module is completed
+    # FIXED: Improved access control logic
     can_access = True
     if module.order > 1:
-        previous_module = PathModule.query.filter_by(
-            course_id=module.course_id,
-            order=module.order - 1
-        ).first()
+        # Find all modules in the same course
+        course_modules = PathModule.query.filter_by(
+            course_id=module.course_id
+        ).order_by(PathModule.order).all()
         
-        if previous_module:
+        # Find current module index
+        current_index = next((i for i, m in enumerate(course_modules) if m.id == module_id), -1)
+        
+        if current_index > 0:  # Not the first module
+            previous_module = course_modules[current_index - 1]
             prev_progress = UserProgress.query.filter_by(
                 user_id=firebase_uid,
                 module_id=previous_module.id
             ).first()
             
+            # Only lock if previous module exists and is not completed
             can_access = prev_progress and prev_progress.status == 'completed'
+        else:
+            # First module in course is always accessible
+            can_access = True
     
     # Load resources only when accessing module
     resources = ModuleResource.query.filter_by(module_id=module_id).all()
@@ -291,17 +339,99 @@ def get_module_content(module_id):
                 'difficulty': r.difficulty
             } for r in resources
         ],
-        'can_access': can_access,
+        'can_access': can_access,  # This will properly control access
         'current_progress': progress.status if progress else 'not_started'
     }
     
-    # Cache the response
-    _cache['modules'][cache_key] = {
+    # Cache the response in MEMORY only
+    _memory_cache['modules'][cache_key] = {
         'data': response_data,
         'timestamp': datetime.now()
     }
     
     return jsonify(response_data), 200
+
+
+@learning_pathfinder_bp.route('/learning-path/module-ai-content/<int:module_id>', methods=['GET'])
+@handle_errors
+def get_module_ai_content(module_id):
+    """
+    Get AI-generated educational content for a module
+    Uses SEPARATE dedicated caching system
+    """
+    firebase_uid = request.args.get('firebase_uid')
+    module_title = request.args.get('module_title')
+    module_description = request.args.get('module_description')
+    
+    if not all([firebase_uid, module_title, module_description]):
+        return jsonify({'error': 'Missing required parameters'}), 400
+    
+    # Verify module exists and user has access
+    module = PathModule.query.get(module_id)
+    if not module:
+        return jsonify({'error': 'Module not found'}), 404
+    
+    learning_path = LearningPath.query.get(module.path_id)
+    if not learning_path or learning_path.user_id != firebase_uid:
+        return jsonify({'error': 'Access denied'}), 403
+    
+    # Check DEDICATED module AI content cache
+    cache_entry = ModuleAIContentCache.query.filter_by(
+        module_id=module_id,
+        is_valid=True
+    ).first()
+    
+    if cache_entry:
+        print(f"✅ [MODULE AI] Serving from cache (used {cache_entry.usage_count} times)")
+        import json
+        try:
+            content_data = json.loads(cache_entry.ai_content)
+            
+            # Update usage statistics
+            cache_entry.increment_usage()
+            db.session.commit()
+            
+            return jsonify(content_data), 200
+        except Exception as e:
+            print(f"❌ [MODULE AI] Error parsing cached content: {e}")
+            # Invalidate bad cache
+            cache_entry.invalidate()
+            db.session.commit()
+    
+    # Generate new content
+    try:
+        from app.services.gemini_content_service import get_enhanced_gemini_service
+        gemini_service = get_enhanced_gemini_service()
+        
+        print(f"🤖 [MODULE AI] Generating new content for: {module_title}")
+        ai_content = gemini_service.generate_enhanced_content(
+            module_title=module_title,
+            module_description=module_description
+        )
+        
+        # Cache the generated content in DEDICATED table
+        import json
+        content_hash = ModuleAIContentCache.generate_content_hash(module_title, module_description)
+        
+        new_cache = ModuleAIContentCache(
+            module_id=module_id,
+            content_hash=content_hash,
+            ai_content=json.dumps(ai_content),
+            model_used='gemini-2.0-flash',
+            is_valid=True,
+            usage_count=1
+        )
+        db.session.add(new_cache)
+        db.session.commit()
+        
+        print(f"✅ [MODULE AI] Content generated and cached for module {module_id}")
+        return jsonify(ai_content), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"[MODULE AI] Error generating content: {e}")
+        # Return fallback content without caching
+        fallback_content = gemini_service._get_fallback_content(module_title)
+        return jsonify(fallback_content), 200
 
 
 @learning_pathfinder_bp.route('/learning-path/update-progress', methods=['POST'])
@@ -344,7 +474,6 @@ def update_module_progress():
                 streak.update_streak()
             
             # Award points
-            from app.models.learning_pathfinder import UserPoints
             points_record = UserPoints.query.filter_by(user_id=data['firebase_uid']).first()
             if not points_record:
                 points_record = UserPoints(user_id=data['firebase_uid'], points=0)
@@ -383,15 +512,15 @@ def update_module_progress():
     
     db.session.commit()
     
-    # Invalidate cache
-    if data['firebase_uid'] in _cache['roadmaps']:
-        del _cache['roadmaps'][data['firebase_uid']]
+    # Invalidate ONLY roadmap cache (not module AI content cache)
+    if data['firebase_uid'] in _memory_cache['roadmaps']:
+        del _memory_cache['roadmaps'][data['firebase_uid']]
     
-    # Invalidate database cache
+    # Invalidate database roadmap cache
     RoadmapCache.query.filter_by(user_id=data['firebase_uid']).update({'is_valid': False})
     db.session.commit()
     
-    # Find next module
+     # Find next module and check if it's accessible
     current_module = PathModule.query.get(data['module_id'])
     next_module = PathModule.query.filter_by(
         course_id=current_module.course_id,
@@ -399,12 +528,19 @@ def update_module_progress():
     ).first()
     
     next_module_data = None
+    next_module_accessible = False
+    
     if next_module:
+        # Check if next module will be accessible after this completion
+        if data['status'] == 'completed':
+            next_module_accessible = True
+        
         next_module_data = {
             'id': next_module.id,
             'title': next_module.title,
             'description': next_module.description,
-            'estimated_time': next_module.estimated_time
+            'estimated_time': next_module.estimated_time,
+            'will_be_accessible': next_module_accessible
         }
     
     return jsonify({
@@ -426,7 +562,8 @@ def complete_module():
     if missing_fields:
         return jsonify({'error': f'Missing: {", ".join(missing_fields)}'}), 400
     
-    # Use update_progress endpoint
+    # Set status to completed and use update_progress
+    data['status'] = 'completed'
     return update_module_progress()
 
 
@@ -460,7 +597,6 @@ def get_learning_statistics():
     streak = UserStreak.query.filter_by(user_id=firebase_uid).first()
     
     # Get points
-    from app.models.learning_pathfinder import UserPoints
     points = UserPoints.query.filter_by(user_id=firebase_uid).first()
     
     # Get session data
@@ -547,35 +683,6 @@ def get_available_domains():
     return jsonify({'domains': domains_data}), 200
 
 
-@learning_pathfinder_bp.route('/learning-path/reset', methods=['POST'])
-@handle_errors
-def reset_learning_path():
-    """Reset user's learning path"""
-    data = request.get_json()
-    
-    if not data.get('firebase_uid'):
-        return jsonify({'error': 'firebase_uid is required'}), 400
-    
-    if not data.get('confirm'):
-        return jsonify({'error': 'Confirmation required'}), 400
-    
-    # Clear caches first
-    if data['firebase_uid'] in _cache['roadmaps']:
-        del _cache['roadmaps'][data['firebase_uid']]
-    
-    RoadmapCache.query.filter_by(user_id=data['firebase_uid']).delete(synchronize_session=False)
-    
-    # Delete learning paths (cascade will handle related data automatically)
-    LearningPath.query.filter_by(user_id=data['firebase_uid']).delete(synchronize_session=False)
-    
-    # Delete user profile
-    UserProfile.query.filter_by(user_id=data['firebase_uid']).delete(synchronize_session=False)
-    
-    db.session.commit()
-    
-    return jsonify({'message': 'Learning path reset successfully'}), 200
-
-
 @learning_pathfinder_bp.route('/learning-path/streak', methods=['GET'])
 @handle_errors
 def get_user_streak():
@@ -597,18 +704,114 @@ def get_user_streak():
     return jsonify(streak.to_dict()), 200
 
 
-@learning_pathfinder_bp.route('/learning-path/test', methods=['GET'])
-def test_endpoint():
-    """Health check"""
-    return jsonify({
-        'message': 'Learning Path Finder API is working!',
-        'status': 'success',
-        'version': '3.0',
-        'features': [
-            'Template caching',
-            'Progress tracking',
-            'Session management',
-            'Streak gamification',
-            'Feedback system'
-        ]
-    }), 200
+@learning_pathfinder_bp.route('/learning-path/reset', methods=['POST'])
+@handle_errors
+def reset_learning_path():
+    """Reset user's learning path - SINGLE DEFINITION"""
+    data = request.get_json()
+    
+    if not data.get('firebase_uid'):
+        return jsonify({'error': 'firebase_uid is required'}), 400
+    
+    if not data.get('confirm'):
+        return jsonify({'error': 'Confirmation required'}), 400
+    
+    try:
+        firebase_uid = data['firebase_uid']
+        
+        # Clear ALL caches first
+        if firebase_uid in _memory_cache['roadmaps']:
+            del _memory_cache['roadmaps'][firebase_uid]
+        
+        # Clear memory module caches for this user
+        keys_to_delete = [k for k in _memory_cache['modules'].keys() if k.startswith(f"{firebase_uid}_")]
+        for key in keys_to_delete:
+            del _memory_cache['modules'][key]
+        
+        # Clear database caches
+        RoadmapCache.query.filter_by(user_id=firebase_uid).delete(synchronize_session=False)
+        
+        # Get all learning paths for the user
+        learning_paths = LearningPath.query.filter_by(user_id=firebase_uid).all()
+        
+        for learning_path in learning_paths:
+            # Get all module IDs
+            module_ids = [m.id for m in PathModule.query.filter_by(path_id=learning_path.id).all()]
+            
+            if module_ids:
+                # Delete module AI content cache
+                ModuleAIContentCache.query.filter(
+                    ModuleAIContentCache.module_id.in_(module_ids)
+                ).delete(synchronize_session=False)
+                
+                # Delete module resources
+                ModuleResource.query.filter(
+                    ModuleResource.module_id.in_(module_ids)
+                ).delete(synchronize_session=False)
+                
+                # Delete learning activities
+                LearningActivity.query.filter(
+                    LearningActivity.module_id.in_(module_ids)
+                ).delete(synchronize_session=False)
+                
+                # Delete user progress
+                UserProgress.query.filter(
+                    UserProgress.module_id.in_(module_ids)
+                ).delete(synchronize_session=False)
+                
+                # Delete forum posts and replies
+                forum_post_ids = [p.id for p in ForumPost.query.filter(
+                    ForumPost.module_id.in_(module_ids)
+                ).all()]
+                if forum_post_ids:
+                    ForumReply.query.filter(
+                        ForumReply.post_id.in_(forum_post_ids)
+                    ).delete(synchronize_session=False)
+                ForumPost.query.filter(
+                    ForumPost.module_id.in_(module_ids)
+                ).delete(synchronize_session=False)
+                
+                # Delete module feedback
+                ModuleFeedback.query.filter(
+                    ModuleFeedback.module_id.in_(module_ids)
+                ).delete(synchronize_session=False)
+                
+                # Delete learning sessions
+                LearningSession.query.filter(
+                    LearningSession.module_id.in_(module_ids)
+                ).delete(synchronize_session=False)
+            
+            # Delete path modules
+            PathModule.query.filter_by(path_id=learning_path.id).delete(synchronize_session=False)
+            
+            # Delete course feedback
+            course_ids = [c.id for c in Course.query.filter_by(path_id=learning_path.id).all()]
+            if course_ids:
+                CourseFeedback.query.filter(
+                    CourseFeedback.course_id.in_(course_ids)
+                ).delete(synchronize_session=False)
+                LearningSession.query.filter(
+                    LearningSession.course_id.in_(course_ids)
+                ).delete(synchronize_session=False)
+            
+            # Delete courses
+            Course.query.filter_by(path_id=learning_path.id).delete(synchronize_session=False)
+            
+            # Delete roadmap versions
+            RoadmapVersion.query.filter_by(path_id=learning_path.id).delete(synchronize_session=False)
+        
+        # Delete learning paths
+        LearningPath.query.filter_by(user_id=firebase_uid).delete(synchronize_session=False)
+        
+        # Delete user profile
+        UserProfile.query.filter_by(user_id=firebase_uid).delete(synchronize_session=False)
+        
+        db.session.commit()
+        
+        print(f"✅ [RESET] All data cleared for user {firebase_uid}")
+        return jsonify({'message': 'Learning path reset successfully'}), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error resetting learning path: {str(e)}")
+        return jsonify({'error': 'Failed to reset learning path'}), 500

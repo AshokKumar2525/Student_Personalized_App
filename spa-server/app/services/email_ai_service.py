@@ -1,13 +1,11 @@
 """
-Email AI Service - Categorization and Summarization
-Uses Groq (fast & free) for categorization and OpenAI for summarization
+Email AI Service - Using Gemini for summarization
 """
 
 import os
 import json
-from groq import Groq
-from openai import OpenAI
 import re
+import google.generativeai as genai
 
 
 class EmailAIService:
@@ -21,32 +19,23 @@ class EmailAIService:
     
     def __init__(self):
         """Initialize AI clients"""
-        self.groq_client = None
-        self.openai_client = None
+        self.gemini_model = None
         
-        # Initialize Groq if API key exists
-        groq_key = os.getenv('GROQ_API_KEY')
-        if groq_key:
+        # Initialize Gemini if API key exists
+        gemini_key = os.getenv('GEMINI_API_KEY')
+        if gemini_key:
             try:
-                self.groq_client = Groq(api_key=groq_key)
-                print("✅ Groq client initialized for email service")
+                genai.configure(api_key=gemini_key)
+                # Use gemini-1.5-flash for faster responses
+                self.gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+                print("✅ Gemini initialized for email service")
             except Exception as e:
-                print(f"⚠️ Groq initialization failed: {e}")
-                print("   Email categorization will use rule-based fallback")
-        
-        # Initialize OpenAI if API key exists
-        openai_key = os.getenv('OPENAI_API_KEY')
-        if openai_key:
-            try:
-                self.openai_client = OpenAI(api_key=openai_key)
-                print("✅ OpenAI client initialized for email service")
-            except Exception as e:
-                print(f"⚠️ OpenAI initialization failed: {e}")
-                print("   Summarization will use fallback methods")
+                print(f"⚠️ Gemini initialization failed: {e}")
+                print("   Email summarization will use fallback methods")
     
     def categorize_email(self, subject, sender_email, snippet):
         """
-        Categorize email using AI
+        Categorize email using rule-based logic
         
         Args:
             subject: Email subject
@@ -56,26 +45,16 @@ class EmailAIService:
         Returns:
             str: Category slug ('important', 'work', etc.)
         """
-        # Rule-based quick categorization (fast path)
+        # Rule-based quick categorization
         quick_category = self._quick_categorize(subject, sender_email, snippet)
         if quick_category:
             return quick_category
         
-        # AI categorization (if Groq is available)
-        if self.groq_client:
-            try:
-                return self._ai_categorize(subject, sender_email, snippet)
-            except Exception as e:
-                print(f"AI categorization failed: {e}")
-        
-        # Fallback to 'other'
+        # Default to 'other'
         return 'other'
     
     def _quick_categorize(self, subject, sender_email, snippet):
-        """
-        Quick rule-based categorization
-        Returns category or None if uncertain
-        """
+        """Quick rule-based categorization"""
         subject_lower = (subject or '').lower()
         sender_lower = (sender_email or '').lower()
         snippet_lower = (snippet or '').lower()
@@ -94,7 +73,7 @@ class EmailAIService:
         if any(kw in combined for kw in shopping_keywords):
             return 'shopping'
         
-        # Spam indicators
+        # Spam/Promotions indicators
         spam_keywords = ['unsubscribe', 'click here', 'limited time', 'act now', 
                         'congratulations', 'winner', 'claim your', 'viagra']
         spam_domains = ['noreply@', 'no-reply@', 'notifications@']
@@ -107,55 +86,11 @@ class EmailAIService:
         if any(kw in combined for kw in work_keywords):
             return 'work'
         
-        return None  # Uncertain, needs AI
-    
-    def _ai_categorize(self, subject, sender_email, snippet):
-        """
-        AI-powered categorization using Groq
-        """
-        prompt = f"""Categorize this email into ONE of these categories: {', '.join(self.CATEGORIES)}
-
-Email Details:
-Subject: {subject}
-From: {sender_email}
-Preview: {snippet}
-
-Reply with ONLY the category name (one word), nothing else.
-Categories:
-- important: Critical, urgent, time-sensitive emails
-- work: Professional, job-related communications
-- personal: Family, friends, personal matters
-- finance: Banking, bills, invoices, transactions
-- shopping: Orders, deliveries, e-commerce
-- promotions: Marketing, newsletters, offers
-- spam: Unwanted, suspicious emails
-- other: Anything that doesn't fit above
-
-Category:"""
-
-        try:
-            response = self.groq_client.chat.completions.create(
-                model="llama-3.1-8b-instant",  # Fast and free
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=10
-            )
-            
-            category = response.choices[0].message.content.strip().lower()
-            
-            # Validate response
-            if category in self.CATEGORIES:
-                return category
-            else:
-                return 'other'
-        
-        except Exception as e:
-            print(f"Groq API error: {e}")
-            return 'other'
+        return None
     
     def summarize_email(self, subject, sender_name, body_text):
         """
-        Generate AI summary of email
+        Generate AI summary using Gemini
         
         Args:
             subject: Email subject
@@ -163,124 +98,117 @@ Category:"""
             body_text: Email body (plain text)
         
         Returns:
-            dict: {
-                'summary_text': str,
-                'key_points': list,
-                'action_items': list,
-                'priority': str,
-                'sentiment': str,
-                'model_used': str
-            }
+            dict: Summary data
         """
-        # Truncate body if too long (save API costs)
-        max_chars = 4000
+        # Truncate body if too long
+        max_chars = 8000
         if len(body_text) > max_chars:
             body_text = body_text[:max_chars] + "..."
         
-        # Try OpenAI first (better quality)
-        if self.openai_client:
+        # Try Gemini
+        if self.gemini_model:
             try:
-                return self._openai_summarize(subject, sender_name, body_text)
+                return self._gemini_summarize(subject, sender_name, body_text)
             except Exception as e:
-                print(f"OpenAI summarization failed: {e}")
+                print(f"Gemini summarization failed: {e}")
         
-        # Fallback to Groq
-        if self.groq_client:
-            try:
-                return self._groq_summarize(subject, sender_name, body_text)
-            except Exception as e:
-                print(f"Groq summarization failed: {e}")
-        
-        # Ultimate fallback
+        # Fallback
         return self._fallback_summary(subject, body_text)
     
-    def _openai_summarize(self, subject, sender_name, body_text):
-        """Summarize using OpenAI GPT-4o-mini"""
-        prompt = f"""Summarize this email concisely.
-
-                    Subject: {subject}
-                    From: {sender_name}
-
-                    Email:
-                    {body_text}
-
-                    Provide a JSON response with:
-                    1. summary_text: 2-3 sentence summary
-                    2. key_points: Array of 3-5 key bullet points
-                    3. action_items: Array of specific actions needed (or empty array)
-                    4. priority: "low", "medium", "high", or "urgent"
-                    5. sentiment: "positive", "neutral", or "negative"
-
-                    JSON:"""
-
-        response = self.openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.5,
-            max_tokens=500,
-            response_format={"type": "json_object"}
-        )
-        
-        result = json.loads(response.choices[0].message.content)
-        result['model_used'] = 'gpt-4o-mini'
-        
-        return result
-    
-    def _groq_summarize(self, subject, sender_name, body_text):
-        """Summarize using Groq Llama"""
-        prompt = f"""Summarize this email concisely.
+    def _gemini_summarize(self, subject, sender_name, body_text):
+        """Summarize using Gemini API"""
+        prompt = f"""Analyze this email and provide a concise summary.
 
 Subject: {subject}
 From: {sender_name}
 
-Email:
+Email Content:
 {body_text}
 
-Provide a JSON response with:
-1. summary_text: 2-3 sentence summary
-2. key_points: Array of 3-5 key bullet points
-3. action_items: Array of specific actions needed (or empty array)
-4. priority: "low", "medium", "high", or "urgent"
-5. sentiment: "positive", "neutral", or "negative"
+Provide your response in this exact format (no markdown, no code blocks):
 
-JSON:"""
+SUMMARY:
+[2-3 sentence summary of the email]
 
-        response = self.groq_client.chat.completions.create(
-            model="llama-3.1-70b-versatile",  # Better for summarization
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.5,
-            max_tokens=500
-        )
-        
-        content = response.choices[0].message.content
-        
-        # Extract JSON from response (Groq might include extra text)
-        json_match = re.search(r'\{.*\}', content, re.DOTALL)
-        if json_match:
-            result = json.loads(json_match.group())
-        else:
-            # Fallback parsing
-            result = {
-                'summary_text': content[:200],
-                'key_points': [],
-                'action_items': [],
-                'priority': 'medium',
-                'sentiment': 'neutral'
+KEY POINTS:
+- [First key point]
+- [Second key point]
+- [Third key point]
+
+ACTION ITEMS:
+- [Action item 1 if any, or write "None"]
+- [Action item 2 if any]
+
+PRIORITY: [low/medium/high/urgent]
+SENTIMENT: [positive/neutral/negative]"""
+
+        try:
+            response = self.gemini_model.generate_content(prompt)
+            text = response.text
+            
+            # Parse the response
+            summary_match = re.search(r'SUMMARY:\s*(.+?)(?=KEY POINTS:|$)', text, re.DOTALL)
+            key_points_match = re.search(r'KEY POINTS:\s*(.+?)(?=ACTION ITEMS:|$)', text, re.DOTALL)
+            action_items_match = re.search(r'ACTION ITEMS:\s*(.+?)(?=PRIORITY:|$)', text, re.DOTALL)
+            priority_match = re.search(r'PRIORITY:\s*(\w+)', text)
+            sentiment_match = re.search(r'SENTIMENT:\s*(\w+)', text)
+            
+            # Extract and clean data
+            summary_text = summary_match.group(1).strip() if summary_match else text[:200]
+            
+            # Extract key points
+            key_points = []
+            if key_points_match:
+                points_text = key_points_match.group(1)
+                key_points = [
+                    p.strip().lstrip('- •*').strip() 
+                    for p in points_text.split('\n') 
+                    if p.strip() and p.strip() not in ['', '-', '•', '*']
+                ][:5]  # Max 5 points
+            
+            # Extract action items
+            action_items = []
+            if action_items_match:
+                actions_text = action_items_match.group(1)
+                action_items = [
+                    a.strip().lstrip('- •*').strip() 
+                    for a in actions_text.split('\n') 
+                    if a.strip() and a.strip().lower() not in ['', '-', '•', '*', 'none', 'n/a']
+                ][:5]  # Max 5 actions
+            
+            priority = priority_match.group(1).lower() if priority_match else 'medium'
+            sentiment = sentiment_match.group(1).lower() if sentiment_match else 'neutral'
+            
+            # Validate priority and sentiment
+            if priority not in ['low', 'medium', 'high', 'urgent']:
+                priority = 'medium'
+            if sentiment not in ['positive', 'neutral', 'negative']:
+                sentiment = 'neutral'
+            
+            return {
+                'summary_text': summary_text,
+                'key_points': key_points,
+                'action_items': action_items,
+                'priority': priority,
+                'sentiment': sentiment,
+                'model_used': 'gemini-pro'
             }
-        
-        result['model_used'] = 'llama-3.1-70b'
-        
-        return result
+            
+        except Exception as e:
+            print(f"Gemini parsing error: {e}")
+            raise
     
     def _fallback_summary(self, subject, body_text):
-        """Simple fallback when no AI is available"""
+        """Simple fallback when AI is not available"""
         # Extract first few sentences
         sentences = body_text.split('.')[:3]
-        summary = '. '.join(sentences).strip() + '.'
+        summary = '. '.join(s.strip() for s in sentences if s.strip()).strip()
+        if summary and not summary.endswith('.'):
+            summary += '.'
         
         return {
-            'summary_text': summary[:200],
-            'key_points': [subject],
+            'summary_text': summary[:300] if summary else subject[:200],
+            'key_points': [subject] if subject else [],
             'action_items': [],
             'priority': 'medium',
             'sentiment': 'neutral',

@@ -1,6 +1,5 @@
 """
-Email Summarizer Routes
-API endpoints for email management and summarization
+Email Summarizer Routes - Fixed and Optimized
 """
 
 from flask import Blueprint, request, jsonify
@@ -15,7 +14,23 @@ import traceback
 
 email_bp = Blueprint('email', __name__)
 
-# Error handler decorator
+# Simple in-memory cache
+_cache = {}
+CACHE_EXPIRY = 300  # 5 minutes
+
+def get_cached(key):
+    """Get cached value if not expired"""
+    if key in _cache:
+        data, expiry = _cache[key]
+        if datetime.utcnow() < expiry:
+            return data
+        del _cache[key]
+    return None
+
+def set_cache(key, value, seconds=CACHE_EXPIRY):
+    """Set cache with expiry"""
+    _cache[key] = (value, datetime.utcnow() + timedelta(seconds=seconds))
+
 def handle_errors(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -30,57 +45,36 @@ def handle_errors(f):
     return decorated_function
 
 
+def update_account_tokens(account, gmail_service):
+    """Update account tokens if they were refreshed"""
+    updated = gmail_service.get_updated_credentials()
+    if updated:
+        account.access_token = updated['access_token']
+        if updated.get('refresh_token'):
+            account.refresh_token = updated['refresh_token']
+        if updated.get('token_expiry'):
+            account.token_expires_at = datetime.fromisoformat(updated['token_expiry'])
+        account.updated_at = datetime.utcnow()
+        db.session.commit()
+        print("✅ Account tokens updated")
+
+
 @email_bp.route('/email/connect', methods=['POST'])
 @handle_errors
 def connect_gmail():
-    """
-    Connect Gmail account using OAuth tokens from login
-    
-    Request Body:
-        {
-            "firebase_uid": "string",
-            "access_token": "string",
-            "refresh_token": "string",
-            "token_expires_at": "ISO datetime string"
-        }
-    
-    Response:
-        {
-            "message": "string",
-            "email_address": "string",
-            "account_id": int
-        }
-    """
+    """Connect Gmail account"""
     data = request.get_json()
     
-    # Validate required fields
     required = ['firebase_uid', 'access_token']
     if not all(field in data for field in required):
         return jsonify({'error': 'Missing required fields'}), 400
     
-    # Verify user exists
     user = User.query.filter_by(id=data['firebase_uid']).first()
     if not user:
         return jsonify({'error': 'User not found'}), 404
     
-    # Check if email account already exists
     existing_account = EmailAccount.query.filter_by(user_id=user.id).first()
-    if existing_account:
-        # Update tokens
-        existing_account.access_token = data['access_token']
-        existing_account.refresh_token = data.get('refresh_token')
-        if data.get('token_expires_at'):
-            existing_account.token_expires_at = datetime.fromisoformat(data['token_expires_at'])
-        existing_account.updated_at = datetime.utcnow()
-        db.session.commit()
-        
-        return jsonify({
-            'message': 'Gmail account updated',
-            'email_address': existing_account.email_address,
-            'account_id': existing_account.id
-        }), 200
     
-    # Get user's Gmail address
     try:
         gmail_service = create_gmail_service(
             data['access_token'],
@@ -90,13 +84,32 @@ def connect_gmail():
     except Exception as e:
         return jsonify({'error': f'Failed to connect to Gmail: {str(e)}'}), 400
     
-    # Create email account record
+    if existing_account:
+        existing_account.access_token = data['access_token']
+        existing_account.refresh_token = data.get('refresh_token')
+        existing_account.email_address = email_address
+        if data.get('token_expires_at'):
+            try:
+                existing_account.token_expires_at = datetime.fromisoformat(data['token_expires_at'])
+            except:
+                existing_account.token_expires_at = datetime.utcnow() + timedelta(hours=1)
+        existing_account.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        set_cache(f"account_status:{user.id}", None, 0)
+        
+        return jsonify({
+            'message': 'Gmail account updated',
+            'email_address': existing_account.email_address,
+            'account_id': existing_account.id
+        }), 200
+    
     email_account = EmailAccount(
         user_id=user.id,
         email_address=email_address,
         access_token=data['access_token'],
         refresh_token=data.get('refresh_token'),
-        token_expires_at=datetime.fromisoformat(data['token_expires_at']) if data.get('token_expires_at') else None,
+        token_expires_at=datetime.utcnow() + timedelta(hours=1),
         is_active=True
     )
     
@@ -113,29 +126,12 @@ def connect_gmail():
 @email_bp.route('/email/sync', methods=['POST'])
 @handle_errors
 def sync_emails():
-    """
-    Sync emails from Gmail
-    
-    Request Body:
-        {
-            "firebase_uid": "string",
-            "max_results": int (optional, default 50),
-            "days_back": int (optional, default 30)
-        }
-    
-    Response:
-        {
-            "message": "string",
-            "synced_count": int,
-            "categorized_count": int
-        }
-    """
+    """Fast sync - only last 5 days + starred/important"""
     data = request.get_json()
     
     if not data.get('firebase_uid'):
         return jsonify({'error': 'firebase_uid is required'}), 400
     
-    # Get email account
     email_account = EmailAccount.query.filter_by(
         user_id=data['firebase_uid'],
         is_active=True
@@ -144,42 +140,50 @@ def sync_emails():
     if not email_account:
         return jsonify({'error': 'Gmail account not connected'}), 404
     
-    # Create Gmail service
     gmail_service = create_gmail_service(
         email_account.access_token,
         email_account.refresh_token
     )
     
-    # Get AI service for categorization
+    update_account_tokens(email_account, gmail_service)
     ai_service = get_ai_service()
     
-    # Build query for recent emails
-    max_results = data.get('max_results', 50)
-    days_back = data.get('days_back', 30)
-    after_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y/%m/%d')
-    query = f'after:{after_date}'
+    # Delete old emails (>5 days, not starred)
+    if data.get('delete_old', True):
+        cutoff_date = datetime.utcnow() - timedelta(days=5)
+        Email.query.filter(
+            Email.account_id == email_account.id,
+            Email.email_date < cutoff_date,
+            Email.is_starred == False
+        ).delete()
+        db.session.commit()
     
-    # Fetch emails from Gmail
+    # Fetch emails: last 5 days OR starred OR important
+    max_results = min(data.get('max_results', 50), 100)  # Reduced to 50
+    days_back = data.get('days_back', 5)
+    after_date = (datetime.utcnow() - timedelta(days=days_back)).strftime('%Y/%m/%d')
+    
+    query = f'(after:{after_date} OR is:starred OR is:important) in:inbox'
+    
     result = gmail_service.fetch_emails(max_results=max_results, query=query)
     emails_data = result['emails']
     
     synced_count = 0
-    categorized_count = 0
+    existing_ids = {e.message_id for e in Email.query.filter_by(account_id=email_account.id).all()}
     
     for email_data in emails_data:
-        # Check if email already exists
-        existing = Email.query.filter_by(message_id=email_data['message_id']).first()
-        if existing:
-            continue  # Skip duplicates
+        if email_data['message_id'] in existing_ids:
+            continue
         
-        # Categorize email
         category = ai_service.categorize_email(
             email_data['subject'],
             email_data['sender_email'],
             email_data['snippet']
         )
         
-        # Create email record
+        if email_data.get('is_important'):
+            category = 'important'
+        
         email = Email(
             account_id=email_account.id,
             message_id=email_data['message_id'],
@@ -197,86 +201,69 @@ def sync_emails():
         
         db.session.add(email)
         synced_count += 1
-        categorized_count += 1
     
-    # Update last sync time
+    # Update last sync time (UTC)
     email_account.last_sync_at = datetime.utcnow()
     
-    # Get and store history ID for incremental sync
     history_id = gmail_service.get_history_id()
     if history_id:
         email_account.sync_token = str(history_id)
     
     db.session.commit()
     
+    # Clear cache
+    set_cache(f"emails_list:{data['firebase_uid']}", None, 0)
+    set_cache(f"email_stats:{data['firebase_uid']}", None, 0)
+    
     return jsonify({
         'message': 'Emails synced successfully',
-        'synced_count': synced_count,
-        'categorized_count': categorized_count
+        'synced_count': synced_count
     }), 200
 
 
 @email_bp.route('/email/list', methods=['GET'])
 @handle_errors
 def list_emails():
-    """
-    Get list of emails with filters
-    
-    Query Parameters:
-        firebase_uid: string (required)
-        category: string (optional) - filter by category
-        is_read: boolean (optional) - filter by read status
-        is_starred: boolean (optional) - filter by starred
-        page: int (optional, default 1)
-        per_page: int (optional, default 50)
-    
-    Response:
-        {
-            "emails": [...],
-            "total": int,
-            "page": int,
-            "per_page": int,
-            "categories": [...]
-        }
-    """
+    """Get emails with proper filtering and caching"""
     firebase_uid = request.args.get('firebase_uid')
     if not firebase_uid:
         return jsonify({'error': 'firebase_uid is required'}), 400
     
-    # Get email account
+    cache_key = f"emails_list:{firebase_uid}:{request.args.get('category', 'all')}:{request.args.get('is_read', 'all')}:{request.args.get('is_starred', 'all')}:{request.args.get('page', 1)}"
+    cached = get_cached(cache_key)
+    if cached:
+        return jsonify(cached), 200
+    
     email_account = EmailAccount.query.filter_by(user_id=firebase_uid).first()
     if not email_account:
         return jsonify({'error': 'Gmail account not connected'}), 404
     
-    # Build query
     query = Email.query.filter_by(account_id=email_account.id)
     
-    # Apply filters
+    # Apply filters correctly
     category = request.args.get('category')
     if category:
         query = query.filter_by(category=category)
     
     is_read = request.args.get('is_read')
     if is_read is not None:
-        query = query.filter_by(is_read=is_read.lower() == 'true')
+        read_value = is_read.lower() == 'true'
+        query = query.filter_by(is_read=read_value)
     
     is_starred = request.args.get('is_starred')
     if is_starred is not None:
-        query = query.filter_by(is_starred=is_starred.lower() == 'true')
+        starred_value = is_starred.lower() == 'true'
+        query = query.filter_by(is_starred=starred_value)
     
-    # Pagination
     page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 50))
+    per_page = min(int(request.args.get('per_page', 50)), 100)
     
-    # Order by date (newest first)
     query = query.order_by(Email.email_date.desc())
-    
-    # Get paginated results
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     
     emails_data = [email.to_dict() for email in pagination.items]
     
-    return jsonify({
+    result = {
         'emails': emails_data,
         'total': pagination.total,
         'page': page,
@@ -284,55 +271,59 @@ def list_emails():
         'has_next': pagination.has_next,
         'has_prev': pagination.has_prev,
         'categories': get_all_categories()
-    }), 200
+    }
+    
+    set_cache(cache_key, result, 180)  # 3 minutes
+    
+    return jsonify(result), 200
 
 
 @email_bp.route('/email/<int:email_id>', methods=['GET'])
 @handle_errors
 def get_email_detail(email_id):
-    """
-    Get detailed email content
-    
-    Query Parameters:
-        firebase_uid: string (required)
-        include_body: boolean (optional) - fetch full body from Gmail
-    
-    Response:
-        {
-            "email": {...},
-            "body_text": "string" (if include_body=true),
-            "body_html": "string" (if include_body=true)
-        }
-    """
+    """Get email detail with body, links, and attachments"""
     firebase_uid = request.args.get('firebase_uid')
     if not firebase_uid:
         return jsonify({'error': 'firebase_uid is required'}), 400
     
-    # Get email
+    include_body = request.args.get('include_body', 'false').lower() == 'true'
+    
     email = Email.query.get(email_id)
     if not email:
         return jsonify({'error': 'Email not found'}), 404
     
-    # Verify ownership
     email_account = EmailAccount.query.get(email.account_id)
     if not email_account or email_account.user_id != firebase_uid:
         return jsonify({'error': 'Access denied'}), 403
     
-    response_data = {
-        'email': email.to_dict()
-    }
+    response_data = {'email': email.to_dict()}
     
-    # Fetch full body if requested
-    include_body = request.args.get('include_body', 'false').lower() == 'true'
     if include_body:
-        gmail_service = create_gmail_service(
-            email_account.access_token,
-            email_account.refresh_token
-        )
+        cache_key = f"email_body:{email_id}"
+        cached_body = get_cached(cache_key)
         
-        body = gmail_service.get_message_body(email.message_id)
-        response_data['body_text'] = body['text']
-        response_data['body_html'] = body['html']
+        if cached_body:
+            response_data.update(cached_body)
+        else:
+            gmail_service = create_gmail_service(
+                email_account.access_token,
+                email_account.refresh_token
+            )
+            
+            update_account_tokens(email_account, gmail_service)
+            
+            # Get full message with attachments info
+            full_message = gmail_service.get_message_with_attachments(email.message_id)
+            
+            body_data = {
+                'body_text': full_message['body']['text'],
+                'body_html': full_message['body']['html'],
+                'attachments': full_message['attachments'],
+                'links': full_message['links']
+            }
+            
+            response_data.update(body_data)
+            set_cache(cache_key, body_data, 600)  # 10 minutes
     
     return jsonify(response_data), 200
 
@@ -340,41 +331,21 @@ def get_email_detail(email_id):
 @email_bp.route('/email/<int:email_id>/summarize', methods=['POST'])
 @handle_errors
 def summarize_email(email_id):
-    """
-    Generate AI summary for an email
-    
-    Request Body:
-        {
-            "firebase_uid": "string"
-        }
-    
-    Response:
-        {
-            "summary": {
-                "summary_text": "string",
-                "key_points": [...],
-                "action_items": [...],
-                "priority": "string",
-                "sentiment": "string"
-            }
-        }
-    """
+    """Generate Gemini summary"""
     data = request.get_json()
     
     if not data.get('firebase_uid'):
         return jsonify({'error': 'firebase_uid is required'}), 400
     
-    # Get email
     email = Email.query.get(email_id)
     if not email:
         return jsonify({'error': 'Email not found'}), 404
     
-    # Verify ownership
     email_account = EmailAccount.query.get(email.account_id)
     if not email_account or email_account.user_id != data['firebase_uid']:
         return jsonify({'error': 'Access denied'}), 403
     
-    # Check if summary already exists
+    # Check existing summary
     existing_summary = EmailSummary.query.filter_by(email_id=email_id).first()
     if existing_summary:
         return jsonify({
@@ -382,28 +353,33 @@ def summarize_email(email_id):
             'summary': existing_summary.to_dict()
         }), 200
     
-    # Fetch email body from Gmail
-    gmail_service = create_gmail_service(
-        email_account.access_token,
-        email_account.refresh_token
-    )
-    body = gmail_service.get_message_body(email.message_id)
+    # Get body from cache or Gmail
+    cache_key = f"email_body:{email_id}"
+    cached_body = get_cached(cache_key)
     
-    # Use text body, fallback to HTML if no text
-    body_text = body['text'] if body['text'] else body['html']
+    if cached_body:
+        body_text = cached_body['body_text']
+    else:
+        gmail_service = create_gmail_service(
+            email_account.access_token,
+            email_account.refresh_token
+        )
+        update_account_tokens(email_account, gmail_service)
+        
+        body = gmail_service.get_message_body(email.message_id)
+        body_text = body['text'] if body['text'] else body['html']
     
     if not body_text or len(body_text.strip()) < 50:
         return jsonify({'error': 'Email content too short to summarize'}), 400
     
-    # Generate summary using AI
+    # Generate summary
     ai_service = get_ai_service()
     summary_data = ai_service.summarize_email(
         email.subject,
         email.sender_name or email.sender_email,
-        body_text
+        body_text[:10000]  # Limit for Gemini
     )
     
-    # Save summary to database
     email_summary = EmailSummary(
         email_id=email_id,
         summary_text=summary_data['summary_text'],
@@ -423,218 +399,161 @@ def summarize_email(email_id):
     }), 201
 
 
-@email_bp.route('/email/<int:email_id>/category', methods=['PUT'])
+@email_bp.route('/email/<int:email_id>/mark-read', methods=['PUT'])
 @handle_errors
-def update_category(email_id):
-    """
-    Update email category
-    
-    Request Body:
-        {
-            "firebase_uid": "string",
-            "category": "string"
-        }
-    
-    Response:
-        {
-            "message": "string",
-            "email": {...}
-        }
-    """
+def mark_read(email_id):
+    """Mark email as read - syncs with Gmail"""
     data = request.get_json()
     
-    if not data.get('firebase_uid') or not data.get('category'):
-        return jsonify({'error': 'firebase_uid and category are required'}), 400
+    if not data.get('firebase_uid'):
+        return jsonify({'error': 'firebase_uid is required'}), 400
     
-    # Get email
     email = Email.query.get(email_id)
     if not email:
         return jsonify({'error': 'Email not found'}), 404
     
-    # Verify ownership
     email_account = EmailAccount.query.get(email.account_id)
     if not email_account or email_account.user_id != data['firebase_uid']:
         return jsonify({'error': 'Access denied'}), 403
     
-    # Update category
-    email.category = data['category']
+    is_read = data.get('is_read', True)
+    
+    # Update local DB immediately
+    email.is_read = is_read
     db.session.commit()
     
+    # Clear cache
+    set_cache(f"emails_list:{data['firebase_uid']}", None, 0)
+    set_cache(f"email_stats:{data['firebase_uid']}", None, 0)
+    
+    # Sync with Gmail in background (don't wait)
+    try:
+        gmail_service = create_gmail_service(
+            email_account.access_token,
+            email_account.refresh_token
+        )
+        update_account_tokens(email_account, gmail_service)
+        
+        if is_read:
+            gmail_service.mark_as_read(email.message_id)
+        else:
+            gmail_service.mark_as_unread(email.message_id)
+    except Exception as e:
+        print(f"Gmail sync error (non-critical): {e}")
+    
     return jsonify({
-        'message': 'Category updated successfully',
-        'email': email.to_dict()
+        'message': 'Read status updated',
+        'is_read': is_read
     }), 200
+
+
+@email_bp.route('/email/<int:email_id>', methods=['DELETE'])
+@handle_errors
+def delete_email(email_id):
+    """Delete email - FIXED to work properly"""
+    firebase_uid = request.args.get('firebase_uid')
+    
+    if not firebase_uid:
+        return jsonify({'error': 'firebase_uid is required'}), 400
+    
+    email = Email.query.get(email_id)
+    if not email:
+        return jsonify({'error': 'Email not found'}), 404
+    
+    email_account = EmailAccount.query.get(email.account_id)
+    if not email_account or email_account.user_id != firebase_uid:
+        return jsonify({'error': 'Access denied'}), 403
+    
+    # Delete from local DB immediately
+    db.session.delete(email)
+    db.session.commit()
+    
+    # Clear cache
+    set_cache(f"emails_list:{firebase_uid}", None, 0)
+    set_cache(f"email_stats:{firebase_uid}", None, 0)
+    
+    # Delete from Gmail in background
+    try:
+        gmail_service = create_gmail_service(
+            email_account.access_token,
+            email_account.refresh_token
+        )
+        update_account_tokens(email_account, gmail_service)
+        gmail_service.delete_message(email.message_id)
+        print(f"✅ Email {email_id} deleted from Gmail")
+    except Exception as e:
+        print(f"Gmail delete error (non-critical): {e}")
+    
+    return jsonify({'message': 'Email deleted successfully'}), 200
 
 
 @email_bp.route('/email/<int:email_id>/toggle-star', methods=['PUT'])
 @handle_errors
 def toggle_star(email_id):
-    """
-    Star or unstar an email
-    
-    Request Body:
-        {
-            "firebase_uid": "string",
-            "starred": boolean
-        }
-    
-    Response:
-        {
-            "message": "string",
-            "is_starred": boolean
-        }
-    """
+    """Toggle star"""
     data = request.get_json()
     
     if not data.get('firebase_uid'):
         return jsonify({'error': 'firebase_uid is required'}), 400
     
-    # Get email
     email = Email.query.get(email_id)
     if not email:
         return jsonify({'error': 'Email not found'}), 404
     
-    # Verify ownership
     email_account = EmailAccount.query.get(email.account_id)
     if not email_account or email_account.user_id != data['firebase_uid']:
         return jsonify({'error': 'Access denied'}), 403
     
-    # Toggle star in Gmail
     starred = data.get('starred', True)
-    gmail_service = create_gmail_service(
-        email_account.access_token,
-        email_account.refresh_token
-    )
     
-    success = gmail_service.toggle_star(email.message_id, starred)
+    email.is_starred = starred
+    db.session.commit()
     
-    if success:
-        # Update local database
-        email.is_starred = starred
-        db.session.commit()
-        
-        return jsonify({
-            'message': 'Star toggled successfully',
-            'is_starred': starred
-        }), 200
-    else:
-        return jsonify({'error': 'Failed to toggle star in Gmail'}), 500
-
-
-@email_bp.route('/email/<int:email_id>/mark-read', methods=['PUT'])
-@handle_errors
-def mark_read(email_id):
-    """
-    Mark email as read or unread
+    set_cache(f"emails_list:{data['firebase_uid']}", None, 0)
     
-    Request Body:
-        {
-            "firebase_uid": "string",
-            "is_read": boolean
-        }
+    try:
+        gmail_service = create_gmail_service(
+            email_account.access_token,
+            email_account.refresh_token
+        )
+        update_account_tokens(email_account, gmail_service)
+        gmail_service.toggle_star(email.message_id, starred)
+    except Exception as e:
+        print(f"Gmail sync error: {e}")
     
-    Response:
-        {
-            "message": "string",
-            "is_read": boolean
-        }
-    """
-    data = request.get_json()
-    
-    if not data.get('firebase_uid'):
-        return jsonify({'error': 'firebase_uid is required'}), 400
-    
-    # Get email
-    email = Email.query.get(email_id)
-    if not email:
-        return jsonify({'error': 'Email not found'}), 404
-    
-    # Verify ownership
-    email_account = EmailAccount.query.get(email.account_id)
-    if not email_account or email_account.user_id != data['firebase_uid']:
-        return jsonify({'error': 'Access denied'}), 403
-    
-    # Mark as read/unread in Gmail
-    is_read = data.get('is_read', True)
-    gmail_service = create_gmail_service(
-        email_account.access_token,
-        email_account.refresh_token
-    )
-    
-    if is_read:
-        success = gmail_service.mark_as_read(email.message_id)
-    else:
-        success = gmail_service.mark_as_unread(email.message_id)
-    
-    if success:
-        # Update local database
-        email.is_read = is_read
-        db.session.commit()
-        
-        return jsonify({
-            'message': 'Read status updated successfully',
-            'is_read': is_read
-        }), 200
-    else:
-        return jsonify({'error': 'Failed to update read status in Gmail'}), 500
-
-
-@email_bp.route('/email/categories', methods=['GET'])
-@handle_errors
-def get_categories():
-    """
-    Get all available email categories
-    
-    Response:
-        {
-            "categories": [
-                {
-                    "slug": "string",
-                    "name": "string",
-                    "color": "string",
-                    "icon": "string"
-                }
-            ]
-        }
-    """
     return jsonify({
-        'categories': get_all_categories()
+        'message': 'Star toggled successfully',
+        'is_starred': starred
     }), 200
 
 
 @email_bp.route('/email/stats', methods=['GET'])
 @handle_errors
 def get_email_stats():
-    """
-    Get email statistics for user
-    
-    Query Parameters:
-        firebase_uid: string (required)
-    
-    Response:
-        {
-            "total_emails": int,
-            "unread_count": int,
-            "starred_count": int,
-            "category_counts": {...},
-            "last_sync": "datetime"
-        }
-    """
+    """Get email statistics"""
     firebase_uid = request.args.get('firebase_uid')
     if not firebase_uid:
         return jsonify({'error': 'firebase_uid is required'}), 400
     
-    # Get email account
+    cache_key = f"email_stats:{firebase_uid}"
+    cached = get_cached(cache_key)
+    if cached:
+        return jsonify(cached), 200
+    
     email_account = EmailAccount.query.filter_by(user_id=firebase_uid).first()
     if not email_account:
         return jsonify({'error': 'Gmail account not connected'}), 404
     
-    # Get counts
     total_emails = Email.query.filter_by(account_id=email_account.id).count()
     unread_count = Email.query.filter_by(account_id=email_account.id, is_read=False).count()
     starred_count = Email.query.filter_by(account_id=email_account.id, is_starred=True).count()
     
-    # Get category breakdown
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_count = Email.query.filter(
+        Email.account_id == email_account.id,
+        Email.email_date >= today_start
+    ).count()
+    
     from sqlalchemy import func
     category_counts = dict(
         db.session.query(Email.category, func.count(Email.id))
@@ -643,53 +562,60 @@ def get_email_stats():
         .all()
     )
     
-    return jsonify({
+    result = {
         'total_emails': total_emails,
         'unread_count': unread_count,
         'starred_count': starred_count,
+        'today_count': today_count,
         'category_counts': category_counts,
         'last_sync': email_account.last_sync_at.isoformat() if email_account.last_sync_at else None,
         'email_address': email_account.email_address
-    }), 200
+    }
+    
+    set_cache(cache_key, result, 120)
+    
+    return jsonify(result), 200
 
 
 @email_bp.route('/email/account-status', methods=['GET'])
 @handle_errors
 def get_account_status():
-    """
-    Check if user has Gmail connected
-    
-    Query Parameters:
-        firebase_uid: string (required)
-    
-    Response:
-        {
-            "connected": boolean,
-            "email_address": "string" (if connected),
-            "last_sync": "datetime" (if connected)
-        }
-    """
+    """Get account status"""
     firebase_uid = request.args.get('firebase_uid')
     if not firebase_uid:
         return jsonify({'error': 'firebase_uid is required'}), 400
     
+    cache_key = f"account_status:{firebase_uid}"
+    cached = get_cached(cache_key)
+    if cached:
+        return jsonify(cached), 200
+    
     email_account = EmailAccount.query.filter_by(user_id=firebase_uid).first()
     
     if email_account:
-        return jsonify({
+        result = {
             'connected': True,
             'email_address': email_account.email_address,
             'last_sync': email_account.last_sync_at.isoformat() if email_account.last_sync_at else None
-        }), 200
+        }
     else:
-        return jsonify({
-            'connected': False
-        }), 200
+        result = {'connected': False}
+    
+    set_cache(cache_key, result, 300)
+    
+    return jsonify(result), 200
+
+
+@email_bp.route('/email/categories', methods=['GET'])
+@handle_errors
+def get_categories():
+    """Get all categories"""
+    return jsonify({'categories': get_all_categories()}), 200
 
 
 @email_bp.route('/email/test', methods=['GET'])
 def test_endpoint():
-    """Health check endpoint"""
+    """Health check"""
     return jsonify({
         'message': 'Email Summarizer API is working!',
         'status': 'success'

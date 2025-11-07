@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'api_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class LoginPage extends StatelessWidget {
   final void Function(String, [String?]) onLoginSuccess;
@@ -10,9 +11,9 @@ class LoginPage extends StatelessWidget {
 
   Future<void> signInWithGoogle(BuildContext context) async {
     try {
-      print('🔄 [DEBUG] Starting Google sign in with Gmail scopes...');
+      print('📄 [DEBUG] Starting Google sign in with Gmail scopes...');
       
-      // ⭐ UPDATED: Add Gmail scopes for email access
+      // CRITICAL: Request Gmail scopes with proper configuration
       final GoogleSignIn googleSignIn = GoogleSignIn(
         scopes: [
           'email',
@@ -20,8 +21,28 @@ class LoginPage extends StatelessWidget {
           'https://www.googleapis.com/auth/gmail.readonly',
           'https://www.googleapis.com/auth/gmail.modify',
         ],
+        // IMPORTANT: Add your Web Client ID here for refresh tokens
+        // Get this from Google Cloud Console > APIs & Services > Credentials
+        serverClientId: "199883911433-b7ijtb4g8fru2nvja17poapoghctkeq4.apps.googleusercontent.com",
       );
       
+      // ✅ FORCE CLEAN STATE - Sign out completely first
+      print('📄 [DEBUG] Forcing sign out for clean state...');
+      try {
+        await googleSignIn.signOut();
+        await FirebaseAuth.instance.signOut();
+        
+        // Clear any stored preferences
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('gmail_connected');
+        
+        // Small delay to ensure clean state
+        await Future.delayed(const Duration(milliseconds: 500));
+      } catch (e) {
+        print('⚠️ [DEBUG] Sign out error (expected): $e');
+      }
+      
+      print('📄 [DEBUG] Initiating Google Sign In...');
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
       
       if (googleUser == null) {
@@ -30,28 +51,45 @@ class LoginPage extends StatelessWidget {
       }
 
       print('✅ [DEBUG] Google user obtained: ${googleUser.email}');
+      
+      // Get authentication details
       final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
       
       // Get OAuth tokens
       final String? accessToken = googleAuth.accessToken;
       final String? idToken = googleAuth.idToken;
+      final String? serverAuthCode = googleAuth.serverAuthCode;
       
       print('✅ [DEBUG] Access token obtained: ${accessToken != null}');
+      print('✅ [DEBUG] ID token obtained: ${idToken != null}');
+      print('✅ [DEBUG] Server auth code obtained: ${serverAuthCode != null}');
       
+      // Validate critical tokens
+      if (accessToken == null || idToken == null) {
+        throw Exception('Failed to get required authentication tokens from Google');
+      }
+      
+      // Warning if no server auth code (won't get refresh token)
+      if (serverAuthCode == null) {
+        print('⚠️ [WARNING] No server auth code - add serverClientId to GoogleSignIn configuration');
+      }
+      
+      // Create Firebase credential
       final credential = GoogleAuthProvider.credential(
         accessToken: accessToken,
         idToken: idToken,
       );
 
-      print('🔄 [DEBUG] Signing in with Firebase...');
+      print('📄 [DEBUG] Signing in with Firebase...');
       final UserCredential userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
       final User? firebaseUser = userCredential.user;
 
       if (firebaseUser != null) {
         print('✅ [DEBUG] Firebase user authenticated: ${firebaseUser.uid}');
         
+        // Sync user with backend
         try {
-          print('🔄 [DEBUG] Syncing user with backend...');
+          print('📄 [DEBUG] Syncing user with backend...');
           await ApiService.syncUser(
             firebaseUid: firebaseUser.uid,
             email: firebaseUser.email ?? '',
@@ -59,27 +97,114 @@ class LoginPage extends StatelessWidget {
             avatarUrl: firebaseUser.photoURL,
           );
           print('✅ [DEBUG] User sync completed');
-          
-          // ⭐ NEW: Connect Gmail account with OAuth tokens
-          if (accessToken != null) {
-            print('🔄 [DEBUG] Connecting Gmail account...');
-            try {
-              await ApiService.connectGmail(
-                firebaseUid: firebaseUser.uid,
-                accessToken: accessToken,
-                refreshToken: googleAuth.serverAuthCode, // This might be null, backend handles it
-              );
-              print('✅ [DEBUG] Gmail connected successfully');
-            } catch (e) {
-              print('⚠️ [WARNING] Gmail connection failed: $e');
-              // Don't block login if Gmail connection fails
-            }
-          }
         } catch (e) {
           print('❌ [ERROR] Failed to sync user: $e');
+          // Don't block login if sync fails
+        }
+        
+        // ✅ CRITICAL: Connect Gmail account with detailed error handling
+        bool gmailConnected = false;
+        String? gmailError;
+        
+        print('📄 [DEBUG] Attempting Gmail connection...');
+        try {
+          // Calculate token expiry (Google tokens typically expire in 1 hour)
+          final tokenExpiresAt = DateTime.now().add(const Duration(hours: 1)).toIso8601String();
+          
+          print('📄 [DEBUG] Calling connectGmail API...');
+          final result = await ApiService.connectGmail(
+            firebaseUid: firebaseUser.uid,
+            accessToken: accessToken,
+            refreshToken: serverAuthCode,
+            tokenExpiresAt: tokenExpiresAt,
+          );
+          
+          print('✅ [DEBUG] Gmail connected successfully: ${result['email_address']}');
+          gmailConnected = true;
+          
+          // Store connection status
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('gmail_connected', true);
+          await prefs.setString('gmail_address', result['email_address']);
+          
+        } catch (e) {
+          print('❌ [ERROR] Gmail connection failed: $e');
+          gmailError = e.toString();
+          gmailConnected = false;
+          
+          // Store failed status
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('gmail_connected', false);
+        }
+        
+        // Show appropriate message to user
+        if (context.mounted) {
+          if (gmailConnected) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Row(
+                  children: [
+                    Icon(Icons.check_circle, color: Colors.white),
+                    SizedBox(width: 8),
+                    Text('Gmail connected successfully!'),
+                  ],
+                ),
+                backgroundColor: Colors.green,
+                duration: Duration(seconds: 2),
+              ),
+            );
+          } else {
+            // Determine error message
+            String errorMessage = 'Gmail connection failed';
+            Color errorColor = Colors.orange;
+            
+            if (gmailError?.contains('403') == true || gmailError?.contains('permission') == true) {
+              errorMessage = 'Gmail permissions denied. Please grant all permissions.';
+              errorColor = Colors.red;
+            } else if (gmailError?.contains('401') == true || gmailError?.contains('invalid') == true) {
+              errorMessage = 'Invalid credentials. Please try again.';
+              errorColor = Colors.red;
+            } else if (gmailError?.contains('network') == true || gmailError?.contains('timeout') == true) {
+              errorMessage = 'Network error. Check connection and retry.';
+              errorColor = Colors.orange;
+            }
+            
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.warning, color: Colors.white),
+                        SizedBox(width: 8),
+                        Expanded(child: Text(errorMessage)),
+                      ],
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'You can retry from Email Summarizer',
+                      style: TextStyle(fontSize: 12, color: Colors.white70),
+                    ),
+                  ],
+                ),
+                backgroundColor: errorColor,
+                duration: const Duration(seconds: 4),
+                action: SnackBarAction(
+                  label: 'Help',
+                  textColor: Colors.white,
+                  onPressed: () {
+                    _showGmailHelpDialog(context);
+                  },
+                ),
+              ),
+            );
+          }
         }
 
-        print('🔄 [DEBUG] Calling onLoginSuccess...');
+        // Proceed with login regardless of Gmail connection status
+        print('📄 [DEBUG] Calling onLoginSuccess...');
         onLoginSuccess(
           firebaseUser.displayName ?? googleUser.displayName ?? "User",
           firebaseUser.photoURL,
@@ -89,14 +214,130 @@ class LoginPage extends StatelessWidget {
     } catch (e) {
       print('❌ [ERROR] Login failed: $e');
       if (context.mounted) {
+        // Determine error type
+        String errorMessage = 'Login failed. Please try again.';
+        
+        if (e.toString().contains('network')) {
+          errorMessage = 'Network error. Check your connection.';
+        } else if (e.toString().contains('cancelled')) {
+          errorMessage = 'Login cancelled.';
+        } else if (e.toString().contains('sign_in_failed')) {
+          errorMessage = 'Sign in failed. Please try again.';
+        }
+        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Login failed: $e'),
+            content: Row(
+              children: [
+                Icon(Icons.error, color: Colors.white),
+                SizedBox(width: 8),
+                Expanded(child: Text(errorMessage)),
+              ],
+            ),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
           ),
         );
       }
     }
+  }
+
+  void _showGmailHelpDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.help_outline, color: Theme.of(ctx).primaryColor),
+            SizedBox(width: 8),
+            Text('Gmail Connection Help'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'To connect Gmail, please:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 12),
+              _buildHelpStep('1', 'Log out from this app'),
+              _buildHelpStep('2', 'Go to Google Account settings:\nmyaccount.google.com/permissions'),
+              _buildHelpStep('3', 'Remove this app from the list'),
+              _buildHelpStep('4', 'Log in again and accept ALL permissions'),
+              SizedBox(height: 12),
+              Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info, color: Colors.orange.shade700, size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'You must grant Gmail permissions during login',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.orange.shade900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHelpStep(String number, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: Colors.blue.shade100,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                number,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blue.shade700,
+                ),
+              ),
+            ),
+          ),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(fontSize: 14),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override

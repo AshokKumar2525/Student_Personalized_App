@@ -455,19 +455,22 @@ CRITICAL: Return complete, valid JSON only. No markdown."""
         courses_data = roadmap_data.get('courses', [])
         
         for course_data in courses_data:
+            # Calculate course time from modules (FIXED)
+            modules_data = course_data.get('modules', [])
+            course_total_time = sum(module.get('estimated_time', 60) for module in modules_data)
+            
             course = Course(
                 path_id=learning_path.id,
                 title=course_data['title'],
                 description=course_data.get('description', ''),
                 order=course_data.get('order', 1),
-                estimated_time=course_data.get('estimated_time', 600),
+                estimated_time=course_total_time,  # Use calculated time, not fixed
                 created_at=datetime.utcnow()
             )
             db.session.add(course)
             db.session.flush()
             
             # Create modules
-            modules_data = course_data.get('modules', [])
             for module_data in modules_data:
                 module = PathModule(
                     course_id=course.id,
@@ -492,7 +495,7 @@ CRITICAL: Return complete, valid JSON only. No markdown."""
                 db.session.add(progress)
                 
                 # Add placeholder resources
-                for resource_data in module_data.get('resources', [])[:2]:  # Limit to 2
+                for resource_data in module_data.get('resources', [])[:2]:
                     resource = ModuleResource(
                         module_id=module.id,
                         title=resource_data.get('title', 'Resource'),
