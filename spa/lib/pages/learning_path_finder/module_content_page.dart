@@ -155,8 +155,11 @@ class _ModuleContentPageState extends State<ModuleContentPage> with SingleTicker
             duration: Duration(seconds: 2),
           ),
         );
+        await Future.delayed(const Duration(milliseconds: 500));
 
-        Navigator.pop(context);
+        if (mounted) {
+          Navigator.pop(context, true); // Return true to indicate completion
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -502,35 +505,42 @@ class _ModuleContentPageState extends State<ModuleContentPage> with SingleTicker
     }
   }
 
-  @override
+   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.moduleTitle),
-        backgroundColor: const Color(0xFF1E88E5),
-        foregroundColor: Colors.white,
-        bottom: _hasAccess ? TabBar(
-          controller: _tabController,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          tabs: const [
-            Tab(icon: Icon(Icons.play_circle_outline), text: 'Video'),
-            Tab(icon: Icon(Icons.auto_stories), text: 'Learn'),
-          ],
-        ) : null,
+    return WillPopScope(
+      // ✅ FIX: Handle back button to ensure refresh
+      onWillPop: () async {
+        widget.onModuleCompleted(); // Refresh parent on back
+        return true;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(widget.moduleTitle),
+          backgroundColor: const Color(0xFF1E88E5),
+          foregroundColor: Colors.white,
+          bottom: _hasAccess ? TabBar(
+            controller: _tabController,
+            indicatorColor: Colors.white,
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white70,
+            tabs: const [
+              Tab(icon: Icon(Icons.play_circle_outline), text: 'Video'),
+              Tab(icon: Icon(Icons.auto_stories), text: 'Learn'),
+            ],
+          ) : null,
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : !_hasAccess
+                ? _buildAccessDenied()
+                : TabBarView(
+                    controller: _tabController,
+                    children: [
+                      _buildVideoTab(),
+                      _buildEnhancedAIContentTab(),
+                    ],
+                  ),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : !_hasAccess
-              ? _buildAccessDenied()
-              : TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildVideoTab(),
-                    _buildEnhancedAIContentTab(),
-                  ],
-                ),
     );
   }
 

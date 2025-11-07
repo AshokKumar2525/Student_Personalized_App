@@ -248,7 +248,7 @@ def get_user_learning_path():
 @learning_pathfinder_bp.route('/learning-path/module-content/<int:module_id>', methods=['GET'])
 @handle_errors
 def get_module_content(module_id):
-    """Get module content with proper access control"""
+    """Get module content with FIXED access control"""
     firebase_uid = request.args.get('firebase_uid')
     
     if not firebase_uid:
@@ -258,7 +258,8 @@ def get_module_content(module_id):
     cache_key = f"{firebase_uid}_{module_id}"
     if cache_key in _memory_cache['modules']:
         cached_data = _memory_cache['modules'][cache_key]
-        if datetime.now() - cached_data['timestamp'] < timedelta(seconds=MEMORY_CACHE_DURATION):
+        # ✅ FIX: Reduce cache time to 60 seconds for faster updates
+        if datetime.now() - cached_data['timestamp'] < timedelta(seconds=60):
             print("✅ [MODULE] Serving from memory cache")
             return jsonify(cached_data['data']), 200
     
@@ -270,36 +271,52 @@ def get_module_content(module_id):
     if not learning_path or learning_path.user_id != firebase_uid:
         return jsonify({'error': 'Access denied'}), 403
     
+    # Get current module progress
     progress = UserProgress.query.filter_by(
         user_id=firebase_uid,
         module_id=module_id
     ).first()
     
-    # FIXED: Improved access control logic
-    can_access = True
-    if module.order > 1:
-        # Find all modules in the same course
-        course_modules = PathModule.query.filter_by(
-            course_id=module.course_id
-        ).order_by(PathModule.order).all()
-        
-        # Find current module index
-        current_index = next((i for i, m in enumerate(course_modules) if m.id == module_id), -1)
-        
-        if current_index > 0:  # Not the first module
-            previous_module = course_modules[current_index - 1]
-            prev_progress = UserProgress.query.filter_by(
-                user_id=firebase_uid,
-                module_id=previous_module.id
-            ).first()
-            
-            # Only lock if previous module exists and is not completed
-            can_access = prev_progress and prev_progress.status == 'completed'
-        else:
-            # First module in course is always accessible
-            can_access = True
+    # ✅ FIX: Improved access control logic
+    can_access = False
     
-    # Load resources only when accessing module
+    # Get all modules in this course, ordered properly
+    course_modules = PathModule.query.filter_by(
+        course_id=module.course_id
+    ).order_by(PathModule.order).all()
+    
+    # Find current module's position
+    module_position = next((i for i, m in enumerate(course_modules) if m.id == module_id), -1)
+    
+    if module_position == 0:
+        # ✅ FIX: First module is ALWAYS accessible
+        can_access = True
+        print(f"✅ [ACCESS] Module {module_id} is first in course - ACCESSIBLE")
+    elif module_position > 0:
+        # Check if previous module is completed
+        previous_module = course_modules[module_position - 1]
+        prev_progress = UserProgress.query.filter_by(
+            user_id=firebase_uid,
+            module_id=previous_module.id
+        ).first()
+        
+        # ✅ FIX: Module is accessible if previous is completed OR current is already in progress/completed
+        if prev_progress and prev_progress.status == 'completed':
+            can_access = True
+            print(f"✅ [ACCESS] Previous module {previous_module.id} completed - ACCESSIBLE")
+        elif progress and progress.status in ['in_progress', 'completed']:
+            # Allow access if already started (prevents re-locking)
+            can_access = True
+            print(f"✅ [ACCESS] Module {module_id} already started - ACCESSIBLE")
+        else:
+            can_access = False
+            print(f"❌ [ACCESS] Previous module {previous_module.id} NOT completed - LOCKED")
+    else:
+        # Fallback: if module position not found, allow access
+        can_access = True
+        print(f"⚠️ [ACCESS] Module position unknown - allowing access")
+    
+    # Load resources
     resources = ModuleResource.query.filter_by(module_id=module_id).all()
     
     # Simple educational content
@@ -339,11 +356,11 @@ def get_module_content(module_id):
                 'difficulty': r.difficulty
             } for r in resources
         ],
-        'can_access': can_access,  # This will properly control access
+        'can_access': can_access,
         'current_progress': progress.status if progress else 'not_started'
     }
     
-    # Cache the response in MEMORY only
+    # ✅ FIX: Cache for shorter duration (60 seconds instead of 5 minutes)
     _memory_cache['modules'][cache_key] = {
         'data': response_data,
         'timestamp': datetime.now()
@@ -437,7 +454,7 @@ def get_module_ai_content(module_id):
 @learning_pathfinder_bp.route('/learning-path/update-progress', methods=['POST'])
 @handle_errors
 def update_module_progress():
-    """Update progress with session tracking"""
+    """Update progress with IMPROVED cache clearing"""
     data = request.get_json()
     
     required_fields = ['firebase_uid', 'module_id', 'status']
@@ -479,7 +496,7 @@ def update_module_progress():
                 points_record = UserPoints(user_id=data['firebase_uid'], points=0)
                 db.session.add(points_record)
             
-            points_record.points += 10  # 10 points per module completion
+            points_record.points += 10
             
     else:
         progress = UserProgress(
@@ -512,15 +529,25 @@ def update_module_progress():
     
     db.session.commit()
     
-    # Invalidate ONLY roadmap cache (not module AI content cache)
+    # ✅ FIX: Clear ALL module caches for this course
+    if module:
+        firebase_uid = data['firebase_uid']
+        course_modules = PathModule.query.filter_by(course_id=module.course_id).all()
+        
+        for mod in course_modules:
+            cache_key = f"{firebase_uid}_{mod.id}"
+            if cache_key in _memory_cache['modules']:
+                del _memory_cache['modules'][cache_key]
+                print(f"🗑️ Cleared cache for module {mod.id}")
+    
+    # Invalidate roadmap cache
     if data['firebase_uid'] in _memory_cache['roadmaps']:
         del _memory_cache['roadmaps'][data['firebase_uid']]
     
-    # Invalidate database roadmap cache
     RoadmapCache.query.filter_by(user_id=data['firebase_uid']).update({'is_valid': False})
     db.session.commit()
     
-     # Find next module and check if it's accessible
+    # Find next module
     current_module = PathModule.query.get(data['module_id'])
     next_module = PathModule.query.filter_by(
         course_id=current_module.course_id,
@@ -531,7 +558,6 @@ def update_module_progress():
     next_module_accessible = False
     
     if next_module:
-        # Check if next module will be accessible after this completion
         if data['status'] == 'completed':
             next_module_accessible = True
         

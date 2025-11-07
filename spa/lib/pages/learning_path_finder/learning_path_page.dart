@@ -334,6 +334,18 @@ void _startNewPath() {
                   DropdownMenuItem(value: 'python', child: Text('Python Programming')),
                   DropdownMenuItem(value: 'ai-ml', child: Text('AI & Machine Learning')),
                   DropdownMenuItem(value: 'data-science', child: Text('Data Science')),
+                  DropdownMenuItem(value: 'cybersecurity',child:Text('Cybersecurity')),
+                  DropdownMenuItem(value: 'Android Development',child:Text('Android Development')),
+                  DropdownMenuItem(value: 'cloud-computing', child: Text('Cloud Computing')),
+                  DropdownMenuItem( value: 'DevOps',child:Text('Devops')),
+                  DropdownMenuItem( value: 'Generative AI',child:Text('Generative AI')),
+                  DropdownMenuItem( value: 'AI Agents',child:Text('AI Agents')),
+                  DropdownMenuItem( value: 'Fullstack Development',child:Text('Fullstack Development')),
+                  DropdownMenuItem(value: 'Quantum Computing', child:Text('Quantum Computing')),
+                  DropdownMenuItem( value: 'Interenet Of things',child:Text('Internet Of Things')),
+                  DropdownMenuItem( value: 'UI/UX Design',child:Text('UI/UX Design')),
+                  DropdownMenuItem( value: 'Java',child:Text('Java')),
+                  DropdownMenuItem( value: 'Software Engineering',child:Text('Software Engineering')),
                 ],
                 onChanged: (value) {
                   setState(() => _formData['domain'] = value);
