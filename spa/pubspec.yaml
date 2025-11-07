@@ -41,6 +41,7 @@ dependencies:
   http: ^1.2.2
   url_launcher: ^6.1.10
   cached_network_image: ^3.3.0
+  flutter_html: ^3.0.0
 
 
   # The "flutter_lints" package below contains a set of recommended lints to

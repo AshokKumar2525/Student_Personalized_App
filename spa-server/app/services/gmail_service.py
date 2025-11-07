@@ -9,6 +9,7 @@ from googleapiclient.errors import HttpError
 from datetime import datetime, timedelta
 import base64
 import os
+import re
 
 
 class GmailService:
@@ -336,112 +337,112 @@ class GmailService:
             return parsedate_to_datetime(date_str)
         except:
             return datetime.utcnow()
+    def get_message_with_attachments(self, message_id):
+        """Get email with attachments and links info"""
+        try:
+            message = self.service.users().messages().get(
+                userId='me',
+                id=message_id,
+                format='full'
+            ).execute()
+            
+            payload = message['payload']
+            
+            # Extract body
+            body_text = ''
+            body_html = ''
+            attachments = []
+            
+            if 'parts' in payload:
+                for part in payload['parts']:
+                    body_text, body_html, attachments = self._extract_parts(
+                        part, body_text, body_html, attachments
+                    )
+            else:
+                body = payload.get('body', {})
+                data = body.get('data', '')
+                
+                if data:
+                    decoded = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+                    mime_type = payload.get('mimeType')
+                    
+                    if mime_type == 'text/plain':
+                        body_text = decoded
+                    elif mime_type == 'text/html':
+                        body_html = decoded
+            
+            # Extract links from body
+            links = self._extract_links(body_text + body_html)
+            # # If still no HTML but we have text, wrap it nicely
+            # if not body_html and body_text:
+            #     body_html = "<pre style='white-space:pre-wrap;font-family:inherit;'>" + body_text + "</pre>"
 
+            
+            return {
+                'body': {
+                    'text': body_text.strip(),
+                    'html': body_html.strip()
+                },
+                'attachments': attachments,
+                'links': links
+            }
+        
+        except HttpError as error:
+            print(f"Error getting message with attachments: {error}")
+            raise
+
+
+    def _extract_parts(self, part, body_text='', body_html='', attachments=[]):
+        """Extract body, attachments recursively (supports nested MIME parts)"""
+        mime_type = part.get('mimeType', '')
+        filename = part.get('filename', '')
+        body = part.get('body', {})
+        data = body.get('data', '')
+
+        # If it's an attachment
+        if filename and body.get('attachmentId'):
+            attachments.append({
+                'filename': filename,
+                'mimeType': mime_type,
+                'size': body.get('size', 0),
+                'attachmentId': body.get('attachmentId')
+            })
+        elif data:
+            # Decode normal body data
+            decoded = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+            if mime_type == 'text/plain':
+                body_text += decoded
+            elif mime_type == 'text/html':
+                body_html += decoded
+
+        # Recursively explore nested parts (for multipart/alternative, related, etc.)
+        if 'parts' in part:
+            for nested_part in part['parts']:
+                body_text, body_html, attachments = self._extract_parts(
+                    nested_part, body_text, body_html, attachments
+                )
+
+        # Handle "multipart/alternative" preference — prefer HTML over plain text
+        if mime_type == 'multipart/alternative' and body_html.strip():
+            # If we found an HTML version inside, prefer that
+            body_text = ''
+        return body_text, body_html, attachments
+
+
+
+    def _extract_links(self, text):
+        """Extract URLs from text"""
+        url_pattern = re.compile(
+            r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+        )
+        
+        links = url_pattern.findall(text)
+        
+        # Remove duplicates and limit to 10
+        unique_links = list(dict.fromkeys(links))[:10]
+        
+        return unique_links
 
 def create_gmail_service(access_token, refresh_token=None):
     """Factory function to create GmailService instance"""
     return GmailService(access_token, refresh_token)
-
-"""
-Add these methods to your GmailService class in gmail_service.py
-"""
-
-import re
-
-def get_message_with_attachments(self, message_id):
-    """Get email with attachments and links info"""
-    try:
-        message = self.service.users().messages().get(
-            userId='me',
-            id=message_id,
-            format='full'
-        ).execute()
-        
-        payload = message['payload']
-        
-        # Extract body
-        body_text = ''
-        body_html = ''
-        attachments = []
-        
-        if 'parts' in payload:
-            for part in payload['parts']:
-                body_text, body_html, attachments = self._extract_parts(
-                    part, body_text, body_html, attachments
-                )
-        else:
-            body = payload.get('body', {})
-            data = body.get('data', '')
-            
-            if data:
-                decoded = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
-                mime_type = payload.get('mimeType')
-                
-                if mime_type == 'text/plain':
-                    body_text = decoded
-                elif mime_type == 'text/html':
-                    body_html = decoded
-        
-        # Extract links from body
-        links = self._extract_links(body_text + body_html)
-        
-        return {
-            'body': {
-                'text': body_text.strip(),
-                'html': body_html.strip()
-            },
-            'attachments': attachments,
-            'links': links
-        }
-    
-    except HttpError as error:
-        print(f"Error getting message with attachments: {error}")
-        raise
-
-
-def _extract_parts(self, part, body_text='', body_html='', attachments=[]):
-    """Extract body, attachments recursively"""
-    mime_type = part.get('mimeType', '')
-    filename = part.get('filename', '')
-    body = part.get('body', {})
-    data = body.get('data', '')
-    
-    # Check if it's an attachment
-    if filename and body.get('attachmentId'):
-        attachments.append({
-            'filename': filename,
-            'mimeType': mime_type,
-            'size': body.get('size', 0),
-            'attachmentId': body.get('attachmentId')
-        })
-    elif data:
-        # Regular body content
-        decoded = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
-        
-        if mime_type == 'text/plain':
-            body_text += decoded
-        elif mime_type == 'text/html':
-            body_html += decoded
-    
-    # Recursively check nested parts
-    if 'parts' in part:
-        for nested_part in part['parts']:
-            body_text, body_html, attachments = self._extract_parts(
-                nested_part, body_text, body_html, attachments
-            )
-    
-    return body_text, body_html, attachments
-
-
-def _extract_links(self, text):
-    """Extract URLs from text"""
-    url_pattern = re.compile(
-        r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
-    )
-    
-    links = url_pattern.findall(text)
-    
-    # Remove duplicates and limit to 10
-    unique_links = list(dict.fromkeys(links))[:10]
-    
-    return unique_links

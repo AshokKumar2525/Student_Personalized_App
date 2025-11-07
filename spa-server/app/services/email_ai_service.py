@@ -27,7 +27,7 @@ class EmailAIService:
             try:
                 genai.configure(api_key=gemini_key)
                 # Use gemini-1.5-flash for faster responses
-                self.gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+                self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
                 print("✅ Gemini initialized for email service")
             except Exception as e:
                 print(f"⚠️ Gemini initialization failed: {e}")

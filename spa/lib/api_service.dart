@@ -5,7 +5,7 @@ import 'package:http_parser/http_parser.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://10.140.91.96:5000';
+  static const String baseUrl = 'http://10.219.160.96:5000';
   static const Duration defaultTimeout = Duration(seconds: 30);
   
   // In-memory cache for frequently accessed data
