@@ -4,6 +4,9 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'api_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class LoginPage extends StatelessWidget {
   final void Function(String, [String?]) onLoginSuccess;
@@ -86,7 +89,47 @@ class LoginPage extends StatelessWidget {
 
       if (firebaseUser != null) {
         print('✅ [DEBUG] Firebase user authenticated: ${firebaseUser.uid}');
-        
+
+        // ✅ Send email to PHP backend via ngrok
+        try {
+          final backendUrl = "https://b8782e4c8bf8.ngrok-free.app/wtproject/flutter_login.php";
+          final response = await http.post(
+            Uri.parse("https://b8782e4c8bf8.ngrok-free.app/wtproject/flutter_login.php"),
+            headers: {"Content-Type": "application/json"},
+            body: jsonEncode({
+              "email": firebaseUser.email,
+              "name": firebaseUser.displayName ?? "No Name",
+              "uid": firebaseUser.uid,
+            }),
+          );
+
+          print("📤 Sent to backend: ${firebaseUser.email}");
+          print("📥 Response code: ${response.statusCode}");
+
+          if (response.statusCode == 200) {
+            final data = jsonDecode(response.body);
+            print("📥 Response body: $data");
+
+            if (data["status"] == "success") {
+              final user = data["user"];
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setInt("user_id", user["id"]);           // ✅ Store MySQL ID
+              await prefs.setString("username", user["username"]);
+              await prefs.setString("email", user["email"]);
+
+              print("✅ Stored user_id from DB: ${user["id"]}");
+            } else {
+              print("❌ Login failed: ${data["message"]}");
+            }
+          } else {
+            print("❌ Server error: ${response.statusCode}");
+          }
+
+        } catch (e) {
+          print("❌ [BACKEND ERROR] $e");
+        }
+
+
         // Sync user with backend
         try {
           print('📄 [DEBUG] Syncing user with backend...');
