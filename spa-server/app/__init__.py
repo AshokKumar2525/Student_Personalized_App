@@ -4,6 +4,7 @@ from flask_cors import CORS
 from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
 import os
+from app.services.gemini_content_service import get_enhanced_gemini_service
 
 # Initialize extensions
 db = SQLAlchemy()
@@ -27,6 +28,12 @@ def create_app():
         jwt.init_app(app)
         CORS(app, resources={r"/*": {"origins": "*"}})
 
+        try:
+            # Initialize Gemini AI service
+            get_enhanced_gemini_service()
+        except Exception as e:
+            print(f"⚠️ Gemini AI service not available: {e}")
+
         # Import models to ensure they are registered with SQLAlchemy
         # Import order matters to avoid circular dependencies
         from app.models import utils
@@ -36,12 +43,26 @@ def create_app():
         from app.models.scholarships import Scholarship, ScholarshipCriteria, UserScholarshipPreference, user_saved_scholarships
         from app.models.notifications import Notification, UserNotificationPreference
         
+        
+        # Import email summarizer models
+        from app.models.email_summarizer import EmailAccount, Email, EmailSummary
+        
         # Import remaining learning pathfinder models after core models
         from app.models.learning_pathfinder import (
             UserProfile, LearningPath, PathModule, ModuleResource, UserProgress,
             LearningActivity, ActivitySubmission, Badge, UserBadge, UserPoints,
-            ForumPost, ForumReply, TechUpdate, RoadmapVersion, VersionedModule, UpdateFeedback
+            ForumPost, ForumReply, TechUpdate, RoadmapVersion, VersionedModule, UpdateFeedback,
+            Course
         )
+        
+        # Import NEW enhanced learning path models
+        from app.models.roadmap_templates import (
+            RoadmapTemplate, ModuleFeedback, CourseFeedback
+        )
+        from app.models.enhanced_progress import (
+            LearningSession, UserStreak, RoadmapCache
+        )
+        from app.models.module_ai_content_cache import ModuleAIContentCache
 
         # Import and register blueprints
         from app.routes.auth_routes import auth_bp
@@ -51,12 +72,14 @@ def create_app():
         
 
         # from app.routes.notification_routes import notification_bp
+        from app.routes.email_summarizer_routes import email_bp
 
-        app.register_blueprint(auth_bp,url_prefix='/api')
+        app.register_blueprint(auth_bp, url_prefix='/api')
         app.register_blueprint(main_bp)
         app.register_blueprint(learning_pathfinder_bp,url_prefix='/api')
         app.register_blueprint(scholarship_bp, url_prefix='/api')
         # app.register_blueprint(notification_bp, url_prefix='/notifications')
+        app.register_blueprint(email_bp, url_prefix='/api')
 
         # Create upload directories if they don't exist
         with app.app_context():
@@ -66,4 +89,3 @@ def create_app():
         print(f"Error during app initialization: {e}")
         raise
     return app
-

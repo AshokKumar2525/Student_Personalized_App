@@ -1,3 +1,4 @@
 {
-    "cmake.sourceDirectory": "C:/Users/aparna/Desktop/ASHOK/Student_Personalized_App/spa/linux"
+    "cmake.sourceDirectory": "C:/Users/aparna/Desktop/ASHOK/Student_Personalized_App/spa/linux",
+    "git.ignoreLimitWarning": true
 }

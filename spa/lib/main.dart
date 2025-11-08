@@ -3,6 +3,7 @@ import 'LoginPage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'pages/career_connect/tech_updates_page.dart';
 import 'pages/learning_path_finder/learning_path_page.dart';
+import 'pages/email_summarizer/email_home_page.dart';
 import 'firebase_options.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -13,6 +14,7 @@ import 'dart:io';
 import 'utils/avatar_utils.dart';
 import 'pages/scholarship/scholarship_page.dart';
 import 'pages/finance_tracker/finance_home_screen.dart';
+import 'pages/forum/forum_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -664,17 +666,17 @@ class QuickActionsRow extends StatelessWidget {
 
   final List<Map<String, dynamic>> actions = const [
     {"icon": Icons.edit_note_rounded, "label": "New Task", "color": Color(0xFFF9A825)},
-    {"icon": Icons.directions_run_rounded, "label": "Log Workout", "color": Color(0xFF4CAF50)},
     {"icon": Icons.attach_money_rounded, "label": "Add Expense", "color": Color(0xFFEF5350)},
     {"icon": Icons.mail_rounded, "label": "Check Mail", "color": Color(0xFF29B6F6)},
+    {"icon": Icons.forum_rounded, "label": "Community", "color": Color(0xFF7E57C2)}, // Forum shortcut
   ];
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: actions.map((action) {
           return Column(
             children: [
@@ -682,18 +684,44 @@ class QuickActionsRow extends StatelessWidget {
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: action["color"],
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black26,
+                      blurRadius: 4,
+                      offset: const Offset(2, 2),
+                    ),
+                  ],
                 ),
                 child: IconButton(
                   iconSize: 32,
                   padding: const EdgeInsets.all(16),
                   icon: Icon(action["icon"] as IconData, color: Colors.white),
-                  onPressed: () {},
+                  onPressed: () {
+                    if (action["label"] == "Community") {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const ForumPage()),
+                      );
+                    } else if (action["label"] == "Check Mail") {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const EmailHomePage()),
+                      );
+                    } else if (action["label"] == "Add Expense") {
+                      // TODO: Navigate to expense tracker page (if available)
+                    } else if (action["label"] == "New Task") {
+                      // TODO: Navigate to task creation page (if available)
+                    }
+                  },
                 ),
               ),
               const SizedBox(height: 8),
               Text(
-                action["label"] as String, 
-                style: Theme.of(context).textTheme.bodySmall,
+                action["label"] as String,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w500,
+                  color: Colors.grey[800],
+                ),
                 textAlign: TextAlign.center,
               ),
             ],
@@ -710,10 +738,15 @@ class FeaturesList extends StatelessWidget {
   final List<String> features = const [
     "Tech Updates",
     "Learning Path Finder",
-    "Academic Performance",
-    "Scholarship Related",
     "Important Email Summarizer",
+    "Body Fitness",
+    "Academic Performance",
+    "Medicine Related",
+    "English Communication",
+    "Scholarship Related",
     "Financial Expense Tracker",
+    "Forum", // ✅ Added new feature name for Forum
+    "Discover",
   ];
 
   @override
@@ -782,6 +815,15 @@ class FeaturesList extends StatelessWidget {
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (context) => const ScholarshipPage()),
+              } else if (features[index] == "Important Email Summarizer") {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const EmailHomePage()),
+                );
+              } else if (features[index] == "Forum") { // ✅ Added navigation
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const ForumPage()),
                 );
               }
               // Add other feature navigations here

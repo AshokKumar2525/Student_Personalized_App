@@ -35,6 +35,18 @@ __all__ = [
     "VersionedModule",
     "UpdateFeedback",
 
+    # Course Structure
+    "Course",
+
+    # NEW: Enhanced Learning Path Features
+    "RoadmapTemplate",
+    "ModuleFeedback",
+    "CourseFeedback",
+    "LearningSession",
+    "UserStreak",
+    "RoadmapCache",
+    'ModuleAIContentCache',
+
     # ======================
     # FINANCE TRACKER
     # ======================
@@ -54,5 +66,12 @@ __all__ = [
     # NOTIFICATIONS
     # ======================
     "Notification",
-    "UserNotificationPreference"
+    "UserNotificationPreference",
+
+    # ======================
+    # EMAIL SUMMARIZER
+    # ======================
+    "EmailAccount",
+    "Email",
+    "EmailSummary",
 ]

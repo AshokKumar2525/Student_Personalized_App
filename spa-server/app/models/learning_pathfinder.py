@@ -67,17 +67,19 @@ class LearningPath(db.Model):
     __tablename__ = 'learning_paths'
 
     id = db.Column(Integer, primary_key=True)
-    user_id = db.Column(String(36), ForeignKey('users.id'), nullable=False, index=True)
+    user_id = db.Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
     domain_id = db.Column(Integer, ForeignKey('domains.id'), nullable=False, index=True)
     current_version = db.Column(Integer, default=1)
     created_at = db.Column(DateTime, default=datetime.utcnow)
     updated_at = db.Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationships
+    # Relationships with cascade delete
     user = db.relationship('User', back_populates='learning_paths')
     domain = db.relationship('Domain')
-    courses = db.relationship('Course', back_populates='learning_path', cascade='all, delete-orphan')
-    versions = db.relationship('RoadmapVersion', back_populates='path', cascade='all, delete-orphan')
+    courses = db.relationship('Course', back_populates='learning_path', 
+                            cascade='all, delete-orphan', passive_deletes=True)
+    versions = db.relationship('RoadmapVersion', back_populates='path', 
+                             cascade='all, delete-orphan', passive_deletes=True)
 
 class Course(db.Model):
     """Courses within a learning path"""

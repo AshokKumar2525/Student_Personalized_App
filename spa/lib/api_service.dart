@@ -5,71 +5,131 @@ import 'package:http_parser/http_parser.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class ApiService {
-  static const String baseUrl ='http://10.178.192.5:5000';
-  
-  // Add this method to ApiService class
-static Future<Map<String, dynamic>> syncUser({
-  required String firebaseUid,
-  required String email,
-  String? fullName,
-  String? avatarUrl,
-}) async {
-  try {
-    print('🔄 [DEBUG] Syncing user with Firebase UID: $firebaseUid');
-    print('🔄 [DEBUG] User email: $email');
-    print('🔄 [DEBUG] User fullName: $fullName');
-    print('🔄 [DEBUG] User avatarUrl: $avatarUrl');
+  static const String baseUrl = 'http://10.219.160.96:5000';
+  static const String phpBaseUrl = 'http://10.0.2.2/wtproject'; // ✅ Change for XAMPP
+  static const Duration defaultTimeout = Duration(seconds: 30);
 
-    // Convert Firebase avatar URL to backend format if needed
-    String? processedAvatarUrl = avatarUrl;
-    if (avatarUrl != null && avatarUrl.startsWith('http')) {
-      // This is an external URL (Google), we'll keep it as is
-      // The backend will handle converting it to a local copy if needed
-      processedAvatarUrl = avatarUrl;
-    }
+  // In-memory cache for frequently accessed data
+  static final Map<String, dynamic> _cache = {};
+  static final Map<String, DateTime> _cacheTimestamps = {};
+  static const Duration cacheValidity = Duration(minutes: 5);
 
-    final Map<String, dynamic> userData = {
-      'firebase_uid': firebaseUid,
-      'email': email,
-      'full_name': fullName,
-      'avatar_url': processedAvatarUrl,
-    };
-
-    print('🔄 [DEBUG] Sending data to server: $userData');
-
-    final response = await http.post(
-      Uri.parse('$baseUrl/api/auth/sync-user'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(userData),
-    );
-
-    print('🔍 [DEBUG] Sync response status: ${response.statusCode}');
-    print('🔍 [DEBUG] Sync response body: ${response.body}');
-
-    if (response.statusCode == 200 || response.statusCode == 201) {
-      final responseData = jsonDecode(response.body);
-      print('✅ [DEBUG] User synced successfully');
-      
-      // Update Firebase user profile with the final avatar URL from backend
-      final User? user = FirebaseAuth.instance.currentUser;
-      if (user != null && responseData['user'] != null){
-        final String? finalAvatarUrl = responseData['user']['avatar_url'];
-        if (finalAvatarUrl != null && finalAvatarUrl != user.photoURL) {
-          await user.updatePhotoURL(finalAvatarUrl);
-          print('✅ [DEBUG] Updated Firebase user photo URL');
-        }
-      }
-      
-      return responseData;
-    } else {
-      print('❌ [DEBUG] Sync failed with status: ${response.statusCode}');
-      throw Exception('Failed to sync user: ${response.statusCode} - ${response.body}');
-    }
-  } catch (e) {
-    print('❌ [ERROR] Failed to sync user: $e');
-    rethrow;
+  // Cache helper methods
+  static bool _isCacheValid(String key) {
+    if (!_cache.containsKey(key)) return false;
+    final timestamp = _cacheTimestamps[key];
+    if (timestamp == null) return false;
+    return DateTime.now().difference(timestamp) < cacheValidity;
   }
-}
+
+  static void _setCache(String key, dynamic data) {
+    _cache[key] = data;
+    _cacheTimestamps[key] = DateTime.now();
+  }
+
+  static void _clearCache(String key) {
+    _cache.remove(key);
+    _cacheTimestamps.remove(key);
+  }
+
+  static void _clearAllCaches(String userId) {
+    _clearCache('roadmap_$userId');
+    _clearCache('stats_$userId');
+    _clearCache('streak_$userId');
+  }
+
+  // Existing Firebase sync methods (keep these)
+  static Future<Map<String, dynamic>> syncUser({
+    required String firebaseUid,
+    required String email,
+    String? fullName,
+    String? avatarUrl,
+  }) async {
+    try {
+      String? processedAvatarUrl = avatarUrl;
+      if (avatarUrl != null && avatarUrl.startsWith('http')) {
+        processedAvatarUrl = avatarUrl;
+      }
+
+      final Map<String, dynamic> userData = {
+        'firebase_uid': firebaseUid,
+        'email': email,
+        'full_name': fullName,
+        'avatar_url': processedAvatarUrl,
+      };
+
+      print('📤 [DEBUG] Syncing user: $firebaseUid');
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/auth/sync-user'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(userData),
+      ).timeout(defaultTimeout);
+
+      print('📩 [DEBUG] Sync response: ${response.statusCode}');
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final responseData = jsonDecode(response.body);
+        print('✅ [DEBUG] User synced successfully');
+
+        final User? user = FirebaseAuth.instance.currentUser;
+        if (user != null && responseData['user'] != null) {
+          final String? finalAvatarUrl = responseData['user']['avatar_url'];
+          if (finalAvatarUrl != null && finalAvatarUrl != user.photoURL) {
+            await user.updatePhotoURL(finalAvatarUrl);
+            print('✅ [DEBUG] Updated Firebase user photo URL');
+          }
+        }
+
+        return responseData;
+      } else {
+        print('❌ [DEBUG] Sync failed: ${response.statusCode}');
+        throw Exception('Failed to sync user: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ [ERROR] Failed to sync user: $e');
+      rethrow;
+    }
+  }
+
+  // ⚡️⚡️ ADD THIS NEW METHOD FOR PHP BACKEND INTEGRATION ⚡️⚡️
+  static Future<Map<String, dynamic>> syncUserToPhpBackend({
+    required String firebaseUid,
+    required String email,
+    required String fullName,
+    String? avatarUrl,
+  }) async {
+    try {
+      print('📤 [DEBUG] Syncing Firebase user with PHP backend...');
+
+      final response = await http.post(
+        Uri.parse('$phpBaseUrl/firebase_sync_user.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'firebase_uid': firebaseUid,
+          'email': email,
+          'full_name': fullName,
+          'avatar_url': avatarUrl ?? '',
+        }),
+      ).timeout(defaultTimeout);
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          print('✅ [DEBUG] PHP user sync success: ${data['status']}');
+          return data;
+        } else {
+          throw Exception('PHP backend error: ${data['message']}');
+        }
+      } else {
+        throw Exception('Failed: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ [ERROR] PHP sync failed: $e');
+      rethrow;
+    }
+  }
+
 
   static Future<Map<String, dynamic>> updateProfile({
     required String firebaseUid,
@@ -85,13 +145,12 @@ static Future<Map<String, dynamic>> syncUser({
           'full_name': fullName,
           'avatar_url': avatarUrl,
         }),
-      );
-
+      ).timeout(defaultTimeout);
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       } else {
-        throw Exception('Failed to update profile: ${response.statusCode} - ${response.body}');
+        throw Exception('Failed to update profile: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Failed to update profile: $e');
@@ -102,12 +161,12 @@ static Future<Map<String, dynamic>> syncUser({
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/api/auth/user/$firebaseUid'),
-      );
+      ).timeout(defaultTimeout);
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       } else {
-        throw Exception('Failed to get user: ${response.statusCode} - ${response.body}');
+        throw Exception('Failed to get user: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Failed to get user: $e');
@@ -124,104 +183,62 @@ static Future<Map<String, dynamic>> syncUser({
         Uri.parse('$baseUrl/api/auth/upload-avatar'),
       );
 
-      // Add file
       request.files.add(await http.MultipartFile.fromPath(
         'avatar',
         imageFile.path,
-        contentType: MediaType('image', 'jpeg'), // Adjust based on file type
+        contentType: MediaType('image', 'jpeg'),
       ));
 
-      // Add Firebase UID
       request.fields['firebase_uid'] = firebaseUid;
 
-      var response = await request.send();
+      var response = await request.send().timeout(defaultTimeout);
       var responseData = await response.stream.bytesToString();
 
       if (response.statusCode == 200) {
         return jsonDecode(responseData);
       } else {
-        throw Exception('Failed to upload avatar: ${response.statusCode} - $responseData');
+        throw Exception('Failed to upload avatar: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Failed to upload avatar: $e');
     }
   }
 
-
-static Future<Map<String, dynamic>> generateLearningPath(Map<String, dynamic> assessmentData) async {
+  // Learning Path Methods
+  static Future<Map<String, dynamic>> generateLearningPath(
+    Map<String, dynamic> assessmentData
+  ) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) throw Exception('User not authenticated');
 
+      print('📤 Generating learning path...');
+
       final response = await http.post(
         Uri.parse('$baseUrl/api/learning-path/generate-roadmap'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'firebase_uid': user.uid,
           ...assessmentData,
         }),
+      ).timeout(
+        const Duration(seconds: 60),
+        onTimeout: () {
+          throw Exception('Request timeout. Please try again.');
+        },
       );
 
-      print('Roadmap generation response: ${response.statusCode}');
-      print('Response body: ${response.body}');
+      print('✅ Response: ${response.statusCode}');
 
       if (response.statusCode == 200 || response.statusCode == 201) {
+        // Clear all caches after generating new roadmap
+        _clearAllCaches(user.uid);
         return jsonDecode(response.body);
       } else {
-        throw Exception('Failed to generate roadmap: ${response.statusCode} - ${response.body}');
+        throw Exception('Failed: ${response.statusCode}');
       }
     } catch (e) {
-      print('Error generating roadmap: $e');
-      // Return mock data for development
-      return _getMockRoadmapData(assessmentData);
-    }
-  }
-
-  static Future<Map<String, dynamic>> getModuleContent(int moduleId) async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) throw Exception('User not authenticated');
-
-      final response = await http.get(
-        Uri.parse('$baseUrl/api/learning-path/module-content/$moduleId?firebase_uid=${user.uid}'),
-      );
-
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
-      } else {
-        throw Exception('Failed to get module content: ${response.statusCode}');
-      }
-    } catch (e) {
-      print('Error getting module content: $e');
-      return _getMockModuleContent(moduleId);
-    }
-  }
-
-  static Future<Map<String, dynamic>> completeModule(int moduleId) async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) throw Exception('User not authenticated');
-
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/learning-path/complete-module'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'firebase_uid': user.uid,
-          'module_id': moduleId,
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
-      } else {
-        throw Exception('Failed to complete module: ${response.statusCode} - ${response.body}');
-      }
-    } catch (e) {
-      print('Error completing module: $e');
+      print('❌ Error: $e');
       rethrow;
     }
   }
@@ -231,312 +248,360 @@ static Future<Map<String, dynamic>> generateLearningPath(Map<String, dynamic> as
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) throw Exception('User not authenticated');
 
+      // Check cache first
+      final cacheKey = 'roadmap_${user.uid}';
+      if (_isCacheValid(cacheKey)) {
+        print('✅ Serving roadmap from cache');
+        return _cache[cacheKey];
+      }
+
+      print('📤 Fetching learning path...');
+
       final response = await http.get(
         Uri.parse('$baseUrl/api/learning-path/user-roadmap?firebase_uid=${user.uid}'),
-      );
+      ).timeout(defaultTimeout);
 
       if (response.statusCode == 200) {
-        return jsonDecode(response.body);
+        print('✅ Roadmap loaded');
+        final data = jsonDecode(response.body);
+        _setCache(cacheKey, data);
+        return data;
       } else if (response.statusCode == 404) {
         return {'has_path': false};
       } else {
-        throw Exception('Failed to get roadmap: ${response.statusCode}');
+        throw Exception('Failed: ${response.statusCode}');
       }
     } catch (e) {
-      print('Error getting roadmap: $e');
+      print('❌ Error: $e');
       return {'has_path': false};
     }
   }
 
-  static Future<void> updateModuleProgress(int moduleId, String status) async {
+  static Future<Map<String, dynamic>> getModuleContent(int moduleId) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
+
+      print('📤 Loading module $moduleId...');
+
+      final response = await http.get(
+        Uri.parse(
+          '$baseUrl/api/learning-path/module-content/$moduleId?firebase_uid=${user.uid}'
+        ),
+      ).timeout(defaultTimeout);
+
+      if (response.statusCode == 200) {
+        print('✅ Module loaded');
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Failed: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ Error: $e');
+      rethrow;
+    }
+  }
+
+  static Future<Map<String, dynamic>> getModuleAIContent(
+    int moduleId,
+    String moduleTitle,
+    String moduleDescription,
+  ) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
+
+      print('🤖 Loading AI content for module $moduleId...');
+
+      final response = await http.get(
+        Uri.parse(
+          '$baseUrl/api/learning-path/module-ai-content/$moduleId?'
+          'firebase_uid=${user.uid}&'
+          'module_title=${Uri.encodeComponent(moduleTitle)}&'
+          'module_description=${Uri.encodeComponent(moduleDescription)}'
+        ),
+      ).timeout(
+        const Duration(seconds: 60),
+        onTimeout: () {
+          throw Exception('AI content generation timeout');
+        },
+      );
+
+      if (response.statusCode == 200) {
+        print('✅ AI content loaded');
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Failed to load AI content: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ Error loading AI content: $e');
+      rethrow;
+    }
+  }
+
+  static Future<Map<String, dynamic>> updateModuleProgress(
+    int moduleId,
+    String status, {
+    int? durationMinutes,
+  }) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) throw Exception('User not authenticated');
 
       final response = await http.post(
         Uri.parse('$baseUrl/api/learning-path/update-progress'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'firebase_uid': user.uid,
           'module_id': moduleId,
           'status': status,
+          'duration_minutes': durationMinutes ?? 0,
         }),
-      );
+      ).timeout(defaultTimeout);
 
-      if (response.statusCode != 200) {
-        throw Exception('Failed to update progress: ${response.body}');
+      if (response.statusCode == 200) {
+        // Clear caches after progress update
+        _clearAllCaches(user.uid);
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Failed: ${response.body}');
       }
     } catch (e) {
       throw Exception('Network error: $e');
     }
   }
 
-  static Map<String, dynamic> _getMockModuleContent(int moduleId) {
-    return {
-      'module': {
-        'id': moduleId,
-        'title': 'Sample Module',
-        'description': 'This is a sample module description',
-        'order': 1,
-        'estimated_time': 60
-      },
-      'educational_content': {
-        'explanation': 'This is a brief explanation of the module concept.',
-        'key_concepts': [
-          'Key concept 1 with simple explanation',
-          'Key concept 2 with simple explanation',
-          'Key concept 3 with simple explanation'
-        ],
-        'examples': [
-          'Practical example 1',
-          'Practical example 2'
-        ],
-        'practice_problems': [
-          'Practice problem 1',
-          'Practice problem 2'
-        ]
-      },
-      'resources': [
-        {
-          'id': 1,
-          'title': 'YouTube Tutorial',
-          'url': 'https://www.youtube.com/embed/dQw4w9WgXcQ',
-          'type': 'video',
-          'difficulty': 'beginner'
-        }
-      ],
-      'can_access': true,
-      'current_progress': 'not_started'
-    };
-  }
+  static Future<Map<String, dynamic>> completeModule(int moduleId) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
 
-  static Map<String, dynamic> _getMockRoadmapData(Map<String, dynamic> assessmentData) {
-  final domain = assessmentData['domain'];
-  final level = assessmentData['knowledge_level'];
-  final domainName = _getDomainName(domain);
-  
-  return {
-    'message': 'Learning path generated successfully',
-    'path_id': 'mock_path_001',
-    'domain': domain,
-    'roadmap': {
-      'domain': domain,
-      'domain_name': domainName,
-      'level': level,
-      'estimated_completion': '12 weeks',
-      'progress_percentage': 0.0,
-      'completed_modules': 0,
-      'total_modules': 8,
-      'courses': [
-        {
-          'id': 1,
-          'title': '$domainName Fundamentals',
-          'description': 'Learn the core concepts and basics of $domainName',
-          'order': 1,
-          'estimated_time': 600,
-          'modules': [
-            {
-              'id': 1,
-              'title': 'Introduction to $domainName',
-              'description': 'Get started with the basics and understand core concepts of $domainName',
-              'order': 1,
-              'estimated_time': 120,
-              'status': 'not_started',
-              'resources': [
-                {
-                  'id': 1,
-                  'title': 'Official $domainName Documentation',
-                  'url': 'https://example.com/docs',
-                  'type': 'documentation',
-                  'difficulty': 'beginner'
-                },
-                {
-                  'id': 2,
-                  'title': 'Beginner Tutorial Video',
-                  'url': 'https://youtube.com/watch?v=abc123',
-                  'type': 'video',
-                  'difficulty': 'beginner'
-                }
-              ]
-            },
-            {
-              'id': 2,
-              'title': 'Environment Setup & Tools',
-              'description': 'Set up your development environment and essential tools',
-              'order': 2,
-              'estimated_time': 90,
-              'status': 'not_started',
-              'resources': [
-                {
-                  'id': 3,
-                  'title': 'Installation Guide',
-                  'url': 'https://example.com/install',
-                  'type': 'documentation',
-                  'difficulty': 'beginner'
-                }
-              ]
-            },
-            {
-              'id': 3,
-              'title': 'Core Concepts Deep Dive',
-              'description': 'Master the fundamental building blocks and principles',
-              'order': 3,
-              'estimated_time': 180,
-              'status': 'not_started',
-              'resources': [
-                {
-                  'id': 4,
-                  'title': 'Core Concepts Tutorial',
-                  'url': 'https://example.com/core-concepts',
-                  'type': 'article',
-                  'difficulty': 'beginner'
-                }
-              ]
-            },
-            {
-              'id': 4,
-              'title': 'First Practical Project',
-              'description': 'Apply your knowledge by building your first project',
-              'order': 4,
-              'estimated_time': 210,
-              'status': 'not_started',
-              'resources': [
-                {
-                  'id': 5,
-                  'title': 'Project Tutorial',
-                  'url': 'https://example.com/project',
-                  'type': 'video',
-                  'difficulty': 'intermediate'
-                }
-              ]
-            },
-          ]
-        },
-        {
-          'id': 2,
-          'title': 'Advanced $domainName Concepts',
-          'description': 'Dive deeper into advanced topics, patterns, and best practices',
-          'order': 2,
-          'estimated_time': 800,
-          'modules': [
-            {
-              'id': 5,
-              'title': 'Advanced Techniques & Patterns',
-              'description': 'Learn advanced techniques and design patterns used in production',
-              'order': 1,
-              'estimated_time': 180,
-              'status': 'not_started',
-              'resources': [
-                {
-                  'id': 6,
-                  'title': 'Advanced Patterns Guide',
-                  'url': 'https://example.com/advanced-patterns',
-                  'type': 'article',
-                  'difficulty': 'intermediate'
-                }
-              ]
-            },
-            {
-              'id': 6,
-              'title': 'Real-world Applications',
-              'description': 'Build complex, real-world applications with best practices',
-              'order': 2,
-              'estimated_time': 240,
-              'status': 'not_started',
-              'resources': [
-                {
-                  'id': 7,
-                  'title': 'Real-world Project Tutorial',
-                  'url': 'https://example.com/real-world',
-                  'type': 'video',
-                  'difficulty': 'intermediate'
-                }
-              ]
-            },
-            {
-              'id': 7,
-              'title': 'Performance Optimization',
-              'description': 'Learn how to optimize your applications for better performance',
-              'order': 3,
-              'estimated_time': 150,
-              'status': 'not_started',
-              'resources': [
-                {
-                  'id': 8,
-                  'title': 'Performance Guide',
-                  'url': 'https://example.com/performance',
-                  'type': 'documentation',
-                  'difficulty': 'advanced'
-                }
-              ]
-            },
-            {
-              'id': 8,
-              'title': 'Deployment & Production',
-              'description': 'Deploy your applications to production environments',
-              'order': 4,
-              'estimated_time': 230,
-              'status': 'not_started',
-              'resources': [
-                {
-                  'id': 9,
-                  'title': 'Deployment Guide',
-                  'url': 'https://example.com/deployment',
-                  'type': 'article',
-                  'difficulty': 'intermediate'
-                }
-              ]
-            },
-          ]
-        }
-      ],
-    },
-  };
-}
-  static String _getDomainName(String domainId) {
-  switch (domainId) {
-    case 'web':
-      return 'Web Development';
-    case 'flutter':
-      return 'Flutter Development';
-    case 'python':
-      return 'Python Programming';
-    case 'ai-ml':
-      return 'AI & Machine Learning';
-    case 'data-science':
-      return 'Data Science';
-    case 'mobile':
-      return 'Mobile Development';
-    case 'cloud':
-      return 'Cloud Computing';
-    case 'cybersecurity':
-      return 'Cybersecurity';
-    case 'devops':
-      return 'DevOps';
-    case 'blockchain':
-      return 'Blockchain Development';
-    case 'game-dev':
-      return 'Game Development';
-    case 'ui-ux':
-      return 'UI/UX Design';
-    default:
-      // Capitalize and add "Development" for unknown domains
-      if (domainId.contains('-')) {
-        // Handle kebab-case: "ai-ml" -> "AI & ML Development"
-        final parts = domainId.split('-');
-        final capitalizedParts = parts.map((part) => 
-            part[0].toUpperCase() + part.substring(1).toLowerCase());
-        return capitalizedParts.join(' & ') + ' Development';
+      print('📤 Completing module $moduleId...');
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/learning-path/update-progress'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'firebase_uid': user.uid,
+          'module_id': moduleId,
+          'status': 'completed',
+          'duration_minutes': 0,
+        }),
+      ).timeout(defaultTimeout);
+
+      if (response.statusCode == 200) {
+        final result = jsonDecode(response.body);
+        print('✅ Module completed successfully');
+        print('📝 Next module info: ${result['next_module']}');
+        
+        // Clear all caches
+        _clearAllCaches(user.uid);
+        
+        return result;
       } else {
-        // Handle single word: "python" -> "Python Development"
-        return domainId[0].toUpperCase() + domainId.substring(1).toLowerCase() + ' Development';
+        throw Exception('Failed to complete module: ${response.statusCode}');
       }
+    } catch (e) {
+      print('❌ Error completing module: $e');
+      rethrow;
+    }
+  }
+
+  static Future<Map<String, dynamic>> getLearningStatistics() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
+
+      // Check cache first
+      final cacheKey = 'stats_${user.uid}';
+      if (_isCacheValid(cacheKey)) {
+        print('✅ Serving statistics from cache');
+        return _cache[cacheKey];
+      }
+
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/learning-path/statistics?firebase_uid=${user.uid}'),
+      ).timeout(defaultTimeout);
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        _setCache(cacheKey, data);
+        return data;
+      } else {
+        throw Exception('Failed to get statistics');
+      }
+    } catch (e) {
+      print('Error getting statistics: $e');
+      return {
+        'total_points': 0,
+        'total_sessions': 0,
+        'total_learning_time': 0,
+        'completed_modules': 0,
+        'total_modules': 0,
+      };
+    }
+  }
+
+  static Future<Map<String, dynamic>> getUserStreak() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
+
+      // Check cache first
+      final cacheKey = 'streak_${user.uid}';
+      if (_isCacheValid(cacheKey)) {
+        print('✅ Serving streak from cache');
+        return _cache[cacheKey];
+      }
+
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/learning-path/streak?firebase_uid=${user.uid}'),
+      ).timeout(defaultTimeout);
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        _setCache(cacheKey, data);
+        return data;
+      } else {
+        return {
+          'current_streak': 0,
+          'longest_streak': 0,
+          'total_learning_days': 0,
+        };
+      }
+    } catch (e) {
+      print('Error getting streak: $e');
+      return {
+        'current_streak': 0,
+        'longest_streak': 0,
+        'total_learning_days': 0,
+      };
+    }
+  }
+
+  static Future<void> submitFeedback({
+    required String type,
+    required int targetId,
+    required int rating,
+    String? comments,
+    int? difficultyRating,
+    int? contentQuality,
+    int? timeAccuracy,
+    bool? wouldRecommend,
+  }) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/learning-path/submit-feedback'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'firebase_uid': user.uid,
+          'type': type,
+          'target_id': targetId,
+          'rating': rating,
+          'comments': comments,
+          'difficulty_rating': difficultyRating,
+          'content_quality': contentQuality,
+          'time_accuracy': timeAccuracy,
+          'would_recommend': wouldRecommend,
+        }),
+      ).timeout(defaultTimeout);
+
+      if (response.statusCode != 201) {
+        throw Exception('Failed to submit feedback');
+      }
+    } catch (e) {
+      throw Exception('Network error: $e');
+    }
+  }
+
+  static Future<void> resetLearningPath() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/learning-path/reset'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'firebase_uid': user.uid,
+          'confirm': true,
+        }),
+      ).timeout(defaultTimeout);
+
+      if (response.statusCode == 200) {
+        // Clear all caches after reset
+        _clearAllCaches(user.uid);
+      } else {
+        throw Exception('Failed to reset: ${response.body}');
+      }
+    } catch (e) {
+      throw Exception('Network error: $e');
+    }
+  }
+
+  // Email Methods
+  static Future<Map<String, dynamic>> connectGmail({
+    required String firebaseUid,
+    required String accessToken,
+    String? refreshToken,
+    String? tokenExpiresAt,
+  }) async {
+    try {
+      print('📤 [DEBUG] Connecting Gmail account...');
+      
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/email/connect'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'firebase_uid': firebaseUid,
+          'access_token': accessToken,
+          'refresh_token': refreshToken,
+          'token_expires_at': tokenExpiresAt,
+        }),
+      ).timeout(defaultTimeout);
+
+      print('📧 [DEBUG] Gmail connect response: ${response.statusCode}');
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Failed to connect Gmail: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ [ERROR] Failed to connect Gmail: $e');
+      rethrow;
+    }
+  }
+   static Future<Map<String, dynamic>> refreshModuleVideos(int moduleId) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
+
+      print('🔄 Refreshing videos for module $moduleId...');
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/learning-path/refresh-videos/$moduleId'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'firebase_uid': user.uid,
+        }),
+      ).timeout(defaultTimeout);
+
+      if (response.statusCode == 200) {
+        print('✅ Videos refreshed successfully');
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Failed to refresh videos: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ Error refreshing videos: $e');
+      rethrow;
+    }
   }
 }
-
-// Add these methods to your existing ApiService class in api_service.dart
 
 // SCHOLARSHIP METHODS
 
