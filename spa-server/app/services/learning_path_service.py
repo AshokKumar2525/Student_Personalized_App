@@ -1,6 +1,5 @@
 """
-Learning Path Service - Optimized & Production Ready
-Handles roadmap generation with caching, template reuse, and minimal AI calls
+Learning Path Service - Fixed YouTube Integration
 """
 
 import os
@@ -17,12 +16,8 @@ from app.models.learning_pathfinder import (
 from openai import OpenAI
 import time
 
-# Import enhanced models
-import sys
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
 class LearningPathService:
-    """Optimized service with template caching and minimal API calls"""
+    """Optimized service with fixed YouTube integration"""
     
     CACHE_ENABLED = True
     
@@ -36,20 +31,9 @@ class LearningPathService:
         groq_key = os.getenv('GROQ_API_KEY')
         if groq_key:
             try:
-                # Simple initialization without extra parameters
                 from groq import Groq as GroqClient
                 self.groq_client = GroqClient(api_key=groq_key)
                 print("✅ Groq initialized")
-            except TypeError as e:
-                # Try alternate initialization for older versions
-                try:
-                    import groq
-                    groq.api_key = groq_key
-                    self.groq_client = groq
-                    print("✅ Groq initialized (legacy mode)")
-                except Exception as e2:
-                    print(f"⚠️ Groq init failed: {e2}")
-                    self.groq_client = None
             except Exception as e:
                 print(f"⚠️ Groq init failed: {e}")
                 self.groq_client = None
@@ -71,22 +55,15 @@ class LearningPathService:
         weekly_hours: int,
         learning_pace: str
     ) -> Dict[str, Any]:
-        """
-        Generate learning path with intelligent caching
-        """
+        """Generate learning path with proper YouTube integration"""
         try:
-            # 1. Validate inputs
+            # 1-6. Same as before (validation, domain, template, etc.)
             self._validate_inputs(domain, knowledge_level, weekly_hours, learning_pace)
-            
-            # 2. Get or create domain
             domain_obj = self._get_or_create_domain(domain)
-            
-            # 3. Generate template hash for caching
             template_hash = self._generate_template_hash(
                 domain, knowledge_level, weekly_hours // 5, learning_pace
             )
             
-            # 4. Check for cached template in database
             from app.models.roadmap_templates import RoadmapTemplate
             cached_template = None
             
@@ -106,7 +83,6 @@ class LearningPathService:
                         domain, knowledge_level, familiar_techs, weekly_hours, learning_pace
                     )
                     
-                    # Cache the new template
                     new_template = RoadmapTemplate(
                         template_hash=template_hash,
                         domain_id=domain_obj.id,
@@ -124,21 +100,18 @@ class LearningPathService:
                     domain, knowledge_level, familiar_techs, weekly_hours, learning_pace
                 )
             
-            # 5. Create user profile
             profile = self._create_or_update_profile(
                 user_id, domain_obj.id, knowledge_level, 
                 familiar_techs, weekly_hours, learning_pace
             )
             
-            # 6. Create learning path structure
             learning_path = self._create_learning_path_structure(
                 user_id, domain_obj.id, roadmap_data
             )
             
-            # 7. Enhance with YouTube resources (async/background task in production)
-            self._enhance_with_resources(learning_path.id, roadmap_data)
+            # ✅ FIX: Actually fetch and add YouTube videos
+            self._add_youtube_resources(learning_path.id, roadmap_data)
             
-            # 8. Initialize user streak
             from app.models.enhanced_progress import UserStreak
             if not UserStreak.query.filter_by(user_id=user_id).first():
                 streak = UserStreak(user_id=user_id)
@@ -146,7 +119,6 @@ class LearningPathService:
             
             db.session.commit()
             
-            # 9. Prepare response
             response_data = self._prepare_response(learning_path, roadmap_data)
             
             return {
@@ -439,9 +411,8 @@ CRITICAL: Return complete, valid JSON only. No markdown."""
         domain_id: int,
         roadmap_data: Dict
     ) -> LearningPath:
-        """Create the complete learning path structure"""
+        """Create the complete learning path structure WITHOUT resources"""
         
-        # Create learning path
         learning_path = LearningPath(
             user_id=user_id,
             domain_id=domain_id,
@@ -451,11 +422,9 @@ CRITICAL: Return complete, valid JSON only. No markdown."""
         db.session.add(learning_path)
         db.session.flush()
         
-        # Create courses and modules
         courses_data = roadmap_data.get('courses', [])
         
         for course_data in courses_data:
-            # Calculate course time from modules (FIXED)
             modules_data = course_data.get('modules', [])
             course_total_time = sum(module.get('estimated_time', 60) for module in modules_data)
             
@@ -464,13 +433,12 @@ CRITICAL: Return complete, valid JSON only. No markdown."""
                 title=course_data['title'],
                 description=course_data.get('description', ''),
                 order=course_data.get('order', 1),
-                estimated_time=course_total_time,  # Use calculated time, not fixed
+                estimated_time=course_total_time,
                 created_at=datetime.utcnow()
             )
             db.session.add(course)
             db.session.flush()
             
-            # Create modules
             for module_data in modules_data:
                 module = PathModule(
                     course_id=course.id,
@@ -494,17 +462,7 @@ CRITICAL: Return complete, valid JSON only. No markdown."""
                 )
                 db.session.add(progress)
                 
-                # Add placeholder resources
-                for resource_data in module_data.get('resources', [])[:2]:
-                    resource = ModuleResource(
-                        module_id=module.id,
-                        title=resource_data.get('title', 'Resource'),
-                        url='https://www.youtube.com/results?search_query=' + module_data['title'].replace(' ', '+'),
-                        type=resource_data.get('type', 'video'),
-                        difficulty=resource_data.get('difficulty', 'beginner'),
-                        created_at=datetime.utcnow()
-                    )
-                    db.session.add(resource)
+                # ✅ DON'T add resources here - they'll be added by _add_youtube_resources
         
         return learning_path
     
@@ -514,9 +472,72 @@ CRITICAL: Return complete, valid JSON only. No markdown."""
         # For now, we use search links which are faster than API calls
         pass
     
+    def _add_youtube_resources(self, path_id: int, roadmap_data: Dict):
+        """
+        Add YouTube resources to modules using YouTube API
+        This replaces the old _enhance_with_resources method
+        """
+        try:
+            from app.services.youtube_service import get_youtube_service
+            youtube_service = get_youtube_service()
+            
+            print("🎥 Fetching YouTube videos for modules...")
+            
+            # Get all modules for this path
+            modules = PathModule.query.filter_by(path_id=path_id).all()
+            
+            for module in modules:
+                try:
+                    # Search for videos
+                    videos = youtube_service.search_videos(
+                        query=module.title,
+                        max_results=2,  # Get 2 videos per module
+                        difficulty='beginner'
+                    )
+                    
+                    # Add videos as resources
+                    for video in videos:
+                        # Skip if it's not a valid video URL
+                        if not video.get('video_id'):
+                            continue
+                            
+                        resource = ModuleResource(
+                            module_id=module.id,
+                            title=video['title'],
+                            url=video['url'],  # This will be https://www.youtube.com/watch?v=VIDEO_ID
+                            type='video',
+                            difficulty='beginner',
+                            created_at=datetime.utcnow()
+                        )
+                        db.session.add(resource)
+                    
+                    print(f"✅ Added {len(videos)} videos for: {module.title}")
+                    
+                except Exception as e:
+                    print(f"⚠️ Failed to add videos for {module.title}: {e}")
+                    # Add a fallback resource
+                    search_url = f"https://www.youtube.com/results?search_query={module.title.replace(' ', '+')}"
+                    resource = ModuleResource(
+                        module_id=module.id,
+                        title=f"Search: {module.title}",
+                        url=search_url,
+                        type='video',
+                        difficulty='beginner',
+                        created_at=datetime.utcnow()
+                    )
+                    db.session.add(resource)
+            
+            db.session.flush()
+            print("✅ YouTube resources added successfully")
+            
+        except Exception as e:
+            print(f"⚠️ Error adding YouTube resources: {e}")
+            # Don't fail the entire path generation if YouTube fails
+            pass
+    
     def _prepare_response(self, learning_path: LearningPath, 
                          roadmap_data: Dict) -> Dict:
-        """Prepare final response data"""
+        """Prepare final response data with proper resources"""
         
         courses = Course.query.filter_by(path_id=learning_path.id)\
             .order_by(Course.order).all()
@@ -530,6 +551,7 @@ CRITICAL: Return complete, valid JSON only. No markdown."""
             
             modules_response = []
             for module in modules:
+                # ✅ FIX: Load actual resources
                 resources = ModuleResource.query.filter_by(module_id=module.id).all()
                 
                 modules_response.append({

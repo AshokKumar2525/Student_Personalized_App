@@ -319,7 +319,49 @@ def get_module_content(module_id):
     # Load resources
     resources = ModuleResource.query.filter_by(module_id=module_id).all()
     
-    # Simple educational content
+     # ✅ FIX: If no valid video resources, try to fetch them now
+    has_valid_video = False
+    for r in resources:
+        if r.type == 'video' and 'watch?v=' in r.url:
+            has_valid_video = True
+            break
+    
+    if not has_valid_video and len(resources) > 0:
+        print(f"⚠️ No valid videos found for module {module_id}, attempting to fetch...")
+        try:
+            from app.services.youtube_service import get_youtube_service
+            youtube_service = get_youtube_service()
+            
+            videos = youtube_service.search_videos(
+                query=module.title,
+                max_results=2,
+                difficulty='beginner'
+            )
+            
+            # Delete old invalid resources
+            ModuleResource.query.filter_by(module_id=module_id).delete()
+            
+            # Add new valid videos
+            for video in videos:
+                if video.get('video_id'):
+                    resource = ModuleResource(
+                        module_id=module_id,
+                        title=video['title'],
+                        url=video['url'],
+                        type='video',
+                        difficulty='beginner',
+                        created_at=datetime.utcnow()
+                    )
+                    db.session.add(resource)
+            
+            db.session.commit()
+            
+            # Reload resources
+            resources = ModuleResource.query.filter_by(module_id=module_id).all()
+            
+        except Exception as e:
+            print(f"⚠️ Failed to fetch videos: {e}")
+    
     educational_content = {
         "explanation": f"This module covers {module.title}. {module.description}",
         "key_concepts": [
@@ -336,7 +378,6 @@ def get_module_content(module_id):
             f"Challenge: Advanced {module.title} problem"
         ]
     }
-    
     response_data = {
         'module': {
             'id': module.id,
@@ -351,7 +392,7 @@ def get_module_content(module_id):
                 'id': r.id,
                 'title': r.title,
                 'url': r.url,
-                'embed_url': r.url.replace('watch?v=', 'embed/') if 'youtube.com' in r.url else None,
+                'embed_url': r.url.replace('watch?v=', 'embed/') if 'youtube.com' in r.url and 'watch?v=' in r.url else None,
                 'type': r.type,
                 'difficulty': r.difficulty
             } for r in resources
@@ -360,7 +401,7 @@ def get_module_content(module_id):
         'current_progress': progress.status if progress else 'not_started'
     }
     
-    # ✅ FIX: Cache for shorter duration (60 seconds instead of 5 minutes)
+    # Cache for shorter duration
     _memory_cache['modules'][cache_key] = {
         'data': response_data,
         'timestamp': datetime.now()
@@ -592,6 +633,72 @@ def complete_module():
     data['status'] = 'completed'
     return update_module_progress()
 
+@learning_pathfinder_bp.route('/learning-path/refresh-videos/<int:module_id>', methods=['POST'])
+@handle_errors
+def refresh_module_videos(module_id):
+    """Manually refresh YouTube videos for a module - FIXED"""
+    try:
+        from app.services.youtube_service import get_youtube_service
+        
+        module = PathModule.query.get(module_id)
+        if not module:
+            return jsonify({'error': 'Module not found'}), 404
+        
+        youtube_service = get_youtube_service()
+        
+        # Search for videos
+        videos = youtube_service.search_videos(
+            query=module.title,
+            max_results=3,
+            difficulty='beginner'
+        )
+        
+        # Delete old resources
+        ModuleResource.query.filter_by(module_id=module_id).delete()
+        
+        # Add new videos - ONLY if they have valid video IDs
+        added_count = 0
+        for video in videos:
+            # ✅ FIX: Skip if no valid video ID
+            if not video.get('video_id'):
+                print(f"⚠️ Skipping invalid video: {video.get('title')}")
+                continue
+                
+            resource = ModuleResource(
+                module_id=module_id,
+                title=video['title'],
+                url=video['url'],  # This will be https://www.youtube.com/watch?v=VIDEO_ID
+                type='video',
+                difficulty='beginner',
+                created_at=datetime.utcnow()
+            )
+            db.session.add(resource)
+            added_count += 1
+        
+        # If no videos were added, add a search link
+        if added_count == 0:
+            search_url = f"https://www.youtube.com/results?search_query={module.title.replace(' ', '+')}"
+            resource = ModuleResource(
+                module_id=module_id,
+                title=f"Search: {module.title}",
+                url=search_url,
+                type='link',  # Changed from 'video' to 'link'
+                difficulty='beginner',
+                created_at=datetime.utcnow()
+            )
+            db.session.add(resource)
+            added_count = 1
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Videos refreshed successfully',
+            'count': added_count
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
 
 @learning_pathfinder_bp.route('/learning-path/statistics', methods=['GET'])
 @handle_errors
@@ -841,3 +948,22 @@ def reset_learning_path():
         db.session.rollback()
         current_app.logger.error(f"Error resetting learning path: {str(e)}")
         return jsonify({'error': 'Failed to reset learning path'}), 500
+    
+@learning_pathfinder_bp.route('/learning-path/search-youtube', methods=['POST'])
+@handle_errors
+def search_youtube_videos():
+    """Search YouTube from server side"""
+    data = request.get_json()
+    query = data.get('query')
+    max_results = data.get('max_results', 3)
+    
+    from app.services.youtube_service import get_youtube_service
+    youtube_service = get_youtube_service()
+    
+    videos = youtube_service.search_videos(
+        query=query,
+        max_results=max_results,
+        difficulty='beginner'
+    )
+    
+    return jsonify({'videos': videos}), 200

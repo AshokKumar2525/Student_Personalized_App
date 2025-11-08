@@ -79,9 +79,7 @@ class _LearningPathPageState extends State<LearningPathPage> {
   setState(() => _isGenerating = true);
 
   // Show progress dialog
-  bool dialogShown = false;
   if (mounted) {
-    dialogShown = true;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -96,7 +94,7 @@ class _LearningPathPageState extends State<LearningPathPage> {
               Text('Generating your personalized learning path...'),
               SizedBox(height: 8),
               Text(
-                'This may take 10-30 seconds', 
+                'This may take 30-60 seconds', 
                 style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
               SizedBox(height: 12),
@@ -118,18 +116,20 @@ class _LearningPathPageState extends State<LearningPathPage> {
     // Fetch the roadmap
     final roadmapResponse = await ApiService.getUserLearningPath();
     
-    setState(() {
-      _roadmapData = roadmapResponse;
-      _hasExistingPath = true;
-      _isGenerating = false;
-    });
-    
-    // Close dialog ONLY if it was shown
-    if (mounted && dialogShown && Navigator.canPop(context)) {
-      Navigator.pop(context);
+    // ✅ FIX: Close dialog BEFORE updating state
+    if (mounted && Navigator.canPop(context)) {
+      Navigator.pop(context); // Close the loading dialog
     }
     
+    // Then update state
     if (mounted) {
+      setState(() {
+        _roadmapData = roadmapResponse;
+        _hasExistingPath = true;
+        _isGenerating = false;
+      });
+      
+      // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('✅ Learning path created successfully!'),
@@ -139,14 +139,14 @@ class _LearningPathPageState extends State<LearningPathPage> {
       );
     }
   } catch (e) {
-    setState(() => _isGenerating = false);
-    
-    // Close dialog if open
-    if (mounted && dialogShown && Navigator.canPop(context)) {
-      Navigator.pop(context);
+    // ✅ FIX: Close dialog on error too
+    if (mounted && Navigator.canPop(context)) {
+      Navigator.pop(context); // Close the loading dialog
     }
     
     if (mounted) {
+      setState(() => _isGenerating = false);
+      
       // Show user-friendly error
       String errorMessage = 'Failed to generate learning path';
       
@@ -335,12 +335,12 @@ void _startNewPath() {
                   DropdownMenuItem(value: 'ai-ml', child: Text('AI & Machine Learning')),
                   DropdownMenuItem(value: 'data-science', child: Text('Data Science')),
                   DropdownMenuItem(value: 'cybersecurity',child:Text('Cybersecurity')),
-                  DropdownMenuItem(value: 'Android Development',child:Text('Android Development')),
+                  DropdownMenuItem(value: 'Android',child:Text('Android Development')),
                   DropdownMenuItem(value: 'cloud-computing', child: Text('Cloud Computing')),
                   DropdownMenuItem( value: 'DevOps',child:Text('Devops')),
                   DropdownMenuItem( value: 'Generative AI',child:Text('Generative AI')),
                   DropdownMenuItem( value: 'AI Agents',child:Text('AI Agents')),
-                  DropdownMenuItem( value: 'Fullstack Development',child:Text('Fullstack Development')),
+                  DropdownMenuItem( value: 'Fullstack',child:Text('Fullstack Development')),
                   DropdownMenuItem(value: 'Quantum Computing', child:Text('Quantum Computing')),
                   DropdownMenuItem( value: 'Interenet Of things',child:Text('Internet Of Things')),
                   DropdownMenuItem( value: 'UI/UX Design',child:Text('UI/UX Design')),
