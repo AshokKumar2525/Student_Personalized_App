@@ -248,7 +248,7 @@ def get_user_learning_path():
 @learning_pathfinder_bp.route('/learning-path/module-content/<int:module_id>', methods=['GET'])
 @handle_errors
 def get_module_content(module_id):
-    """Get module content with proper access control"""
+    """Get module content with FIXED access control"""
     firebase_uid = request.args.get('firebase_uid')
     
     if not firebase_uid:
@@ -258,7 +258,8 @@ def get_module_content(module_id):
     cache_key = f"{firebase_uid}_{module_id}"
     if cache_key in _memory_cache['modules']:
         cached_data = _memory_cache['modules'][cache_key]
-        if datetime.now() - cached_data['timestamp'] < timedelta(seconds=MEMORY_CACHE_DURATION):
+        # ✅ FIX: Reduce cache time to 60 seconds for faster updates
+        if datetime.now() - cached_data['timestamp'] < timedelta(seconds=60):
             print("✅ [MODULE] Serving from memory cache")
             return jsonify(cached_data['data']), 200
     
@@ -270,39 +271,97 @@ def get_module_content(module_id):
     if not learning_path or learning_path.user_id != firebase_uid:
         return jsonify({'error': 'Access denied'}), 403
     
+    # Get current module progress
     progress = UserProgress.query.filter_by(
         user_id=firebase_uid,
         module_id=module_id
     ).first()
     
-    # FIXED: Improved access control logic
-    can_access = True
-    if module.order > 1:
-        # Find all modules in the same course
-        course_modules = PathModule.query.filter_by(
-            course_id=module.course_id
-        ).order_by(PathModule.order).all()
-        
-        # Find current module index
-        current_index = next((i for i, m in enumerate(course_modules) if m.id == module_id), -1)
-        
-        if current_index > 0:  # Not the first module
-            previous_module = course_modules[current_index - 1]
-            prev_progress = UserProgress.query.filter_by(
-                user_id=firebase_uid,
-                module_id=previous_module.id
-            ).first()
-            
-            # Only lock if previous module exists and is not completed
-            can_access = prev_progress and prev_progress.status == 'completed'
-        else:
-            # First module in course is always accessible
-            can_access = True
+    # ✅ FIX: Improved access control logic
+    can_access = False
     
-    # Load resources only when accessing module
+    # Get all modules in this course, ordered properly
+    course_modules = PathModule.query.filter_by(
+        course_id=module.course_id
+    ).order_by(PathModule.order).all()
+    
+    # Find current module's position
+    module_position = next((i for i, m in enumerate(course_modules) if m.id == module_id), -1)
+    
+    if module_position == 0:
+        # ✅ FIX: First module is ALWAYS accessible
+        can_access = True
+        print(f"✅ [ACCESS] Module {module_id} is first in course - ACCESSIBLE")
+    elif module_position > 0:
+        # Check if previous module is completed
+        previous_module = course_modules[module_position - 1]
+        prev_progress = UserProgress.query.filter_by(
+            user_id=firebase_uid,
+            module_id=previous_module.id
+        ).first()
+        
+        # ✅ FIX: Module is accessible if previous is completed OR current is already in progress/completed
+        if prev_progress and prev_progress.status == 'completed':
+            can_access = True
+            print(f"✅ [ACCESS] Previous module {previous_module.id} completed - ACCESSIBLE")
+        elif progress and progress.status in ['in_progress', 'completed']:
+            # Allow access if already started (prevents re-locking)
+            can_access = True
+            print(f"✅ [ACCESS] Module {module_id} already started - ACCESSIBLE")
+        else:
+            can_access = False
+            print(f"❌ [ACCESS] Previous module {previous_module.id} NOT completed - LOCKED")
+    else:
+        # Fallback: if module position not found, allow access
+        can_access = True
+        print(f"⚠️ [ACCESS] Module position unknown - allowing access")
+    
+    # Load resources
     resources = ModuleResource.query.filter_by(module_id=module_id).all()
     
-    # Simple educational content
+     # ✅ FIX: If no valid video resources, try to fetch them now
+    has_valid_video = False
+    for r in resources:
+        if r.type == 'video' and 'watch?v=' in r.url:
+            has_valid_video = True
+            break
+    
+    if not has_valid_video and len(resources) > 0:
+        print(f"⚠️ No valid videos found for module {module_id}, attempting to fetch...")
+        try:
+            from app.services.youtube_service import get_youtube_service
+            youtube_service = get_youtube_service()
+            
+            videos = youtube_service.search_videos(
+                query=module.title,
+                max_results=2,
+                difficulty='beginner'
+            )
+            
+            # Delete old invalid resources
+            ModuleResource.query.filter_by(module_id=module_id).delete()
+            
+            # Add new valid videos
+            for video in videos:
+                if video.get('video_id'):
+                    resource = ModuleResource(
+                        module_id=module_id,
+                        title=video['title'],
+                        url=video['url'],
+                        type='video',
+                        difficulty='beginner',
+                        created_at=datetime.utcnow()
+                    )
+                    db.session.add(resource)
+            
+            db.session.commit()
+            
+            # Reload resources
+            resources = ModuleResource.query.filter_by(module_id=module_id).all()
+            
+        except Exception as e:
+            print(f"⚠️ Failed to fetch videos: {e}")
+    
     educational_content = {
         "explanation": f"This module covers {module.title}. {module.description}",
         "key_concepts": [
@@ -319,7 +378,6 @@ def get_module_content(module_id):
             f"Challenge: Advanced {module.title} problem"
         ]
     }
-    
     response_data = {
         'module': {
             'id': module.id,
@@ -334,16 +392,16 @@ def get_module_content(module_id):
                 'id': r.id,
                 'title': r.title,
                 'url': r.url,
-                'embed_url': r.url.replace('watch?v=', 'embed/') if 'youtube.com' in r.url else None,
+                'embed_url': r.url.replace('watch?v=', 'embed/') if 'youtube.com' in r.url and 'watch?v=' in r.url else None,
                 'type': r.type,
                 'difficulty': r.difficulty
             } for r in resources
         ],
-        'can_access': can_access,  # This will properly control access
+        'can_access': can_access,
         'current_progress': progress.status if progress else 'not_started'
     }
     
-    # Cache the response in MEMORY only
+    # Cache for shorter duration
     _memory_cache['modules'][cache_key] = {
         'data': response_data,
         'timestamp': datetime.now()
@@ -437,7 +495,7 @@ def get_module_ai_content(module_id):
 @learning_pathfinder_bp.route('/learning-path/update-progress', methods=['POST'])
 @handle_errors
 def update_module_progress():
-    """Update progress with session tracking"""
+    """Update progress with IMPROVED cache clearing"""
     data = request.get_json()
     
     required_fields = ['firebase_uid', 'module_id', 'status']
@@ -479,7 +537,7 @@ def update_module_progress():
                 points_record = UserPoints(user_id=data['firebase_uid'], points=0)
                 db.session.add(points_record)
             
-            points_record.points += 10  # 10 points per module completion
+            points_record.points += 10
             
     else:
         progress = UserProgress(
@@ -512,15 +570,25 @@ def update_module_progress():
     
     db.session.commit()
     
-    # Invalidate ONLY roadmap cache (not module AI content cache)
+    # ✅ FIX: Clear ALL module caches for this course
+    if module:
+        firebase_uid = data['firebase_uid']
+        course_modules = PathModule.query.filter_by(course_id=module.course_id).all()
+        
+        for mod in course_modules:
+            cache_key = f"{firebase_uid}_{mod.id}"
+            if cache_key in _memory_cache['modules']:
+                del _memory_cache['modules'][cache_key]
+                print(f"🗑️ Cleared cache for module {mod.id}")
+    
+    # Invalidate roadmap cache
     if data['firebase_uid'] in _memory_cache['roadmaps']:
         del _memory_cache['roadmaps'][data['firebase_uid']]
     
-    # Invalidate database roadmap cache
     RoadmapCache.query.filter_by(user_id=data['firebase_uid']).update({'is_valid': False})
     db.session.commit()
     
-     # Find next module and check if it's accessible
+    # Find next module
     current_module = PathModule.query.get(data['module_id'])
     next_module = PathModule.query.filter_by(
         course_id=current_module.course_id,
@@ -531,7 +599,6 @@ def update_module_progress():
     next_module_accessible = False
     
     if next_module:
-        # Check if next module will be accessible after this completion
         if data['status'] == 'completed':
             next_module_accessible = True
         
@@ -566,6 +633,72 @@ def complete_module():
     data['status'] = 'completed'
     return update_module_progress()
 
+@learning_pathfinder_bp.route('/learning-path/refresh-videos/<int:module_id>', methods=['POST'])
+@handle_errors
+def refresh_module_videos(module_id):
+    """Manually refresh YouTube videos for a module - FIXED"""
+    try:
+        from app.services.youtube_service import get_youtube_service
+        
+        module = PathModule.query.get(module_id)
+        if not module:
+            return jsonify({'error': 'Module not found'}), 404
+        
+        youtube_service = get_youtube_service()
+        
+        # Search for videos
+        videos = youtube_service.search_videos(
+            query=module.title,
+            max_results=3,
+            difficulty='beginner'
+        )
+        
+        # Delete old resources
+        ModuleResource.query.filter_by(module_id=module_id).delete()
+        
+        # Add new videos - ONLY if they have valid video IDs
+        added_count = 0
+        for video in videos:
+            # ✅ FIX: Skip if no valid video ID
+            if not video.get('video_id'):
+                print(f"⚠️ Skipping invalid video: {video.get('title')}")
+                continue
+                
+            resource = ModuleResource(
+                module_id=module_id,
+                title=video['title'],
+                url=video['url'],  # This will be https://www.youtube.com/watch?v=VIDEO_ID
+                type='video',
+                difficulty='beginner',
+                created_at=datetime.utcnow()
+            )
+            db.session.add(resource)
+            added_count += 1
+        
+        # If no videos were added, add a search link
+        if added_count == 0:
+            search_url = f"https://www.youtube.com/results?search_query={module.title.replace(' ', '+')}"
+            resource = ModuleResource(
+                module_id=module_id,
+                title=f"Search: {module.title}",
+                url=search_url,
+                type='link',  # Changed from 'video' to 'link'
+                difficulty='beginner',
+                created_at=datetime.utcnow()
+            )
+            db.session.add(resource)
+            added_count = 1
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Videos refreshed successfully',
+            'count': added_count
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
 
 @learning_pathfinder_bp.route('/learning-path/statistics', methods=['GET'])
 @handle_errors
@@ -815,3 +948,22 @@ def reset_learning_path():
         db.session.rollback()
         current_app.logger.error(f"Error resetting learning path: {str(e)}")
         return jsonify({'error': 'Failed to reset learning path'}), 500
+    
+@learning_pathfinder_bp.route('/learning-path/search-youtube', methods=['POST'])
+@handle_errors
+def search_youtube_videos():
+    """Search YouTube from server side"""
+    data = request.get_json()
+    query = data.get('query')
+    max_results = data.get('max_results', 3)
+    
+    from app.services.youtube_service import get_youtube_service
+    youtube_service = get_youtube_service()
+    
+    videos = youtube_service.search_videos(
+        query=query,
+        max_results=max_results,
+        difficulty='beginner'
+    )
+    
+    return jsonify({'videos': videos}), 200

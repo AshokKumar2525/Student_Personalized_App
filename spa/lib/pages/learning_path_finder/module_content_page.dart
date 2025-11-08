@@ -47,12 +47,20 @@ class _ModuleContentPageState extends State<ModuleContentPage> with SingleTicker
     _loadModuleContent();
   }
 
-  @override
-  void dispose() {
-    _tabController.dispose();
-    _trackLearningTime();
-    super.dispose();
+@override
+void dispose() {
+  _tabController.dispose();
+  _trackLearningTime();
+  
+  // Clean up WebView to prevent memory leaks
+  try {
+    _webViewController?.clearCache();
+  } catch (e) {
+    print('WebView cleanup error: $e');
   }
+  
+  super.dispose();
+}
 
   void _onTabChanged() {
     if (_tabController.index == 1 && _aiContent == null && !_isLoadingAIContent) {
@@ -155,8 +163,11 @@ class _ModuleContentPageState extends State<ModuleContentPage> with SingleTicker
             duration: Duration(seconds: 2),
           ),
         );
+        await Future.delayed(const Duration(milliseconds: 500));
 
-        Navigator.pop(context);
+        if (mounted) {
+          Navigator.pop(context, true); // Return true to indicate completion
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -172,138 +183,216 @@ class _ModuleContentPageState extends State<ModuleContentPage> with SingleTicker
     }
   }
 
-  Widget _buildVideoPlayer(String url) {
-    String videoId = '';
-    
-    // Extract video ID from various YouTube URL formats
+  // Replace the _buildVideoPlayer method in module_content_page.dart
+// The issue is the JavaScript injection - YouTube blocks it with Trusted Types
+
+Widget _buildVideoPlayer(String url) {
+  String videoId = '';
+  
+  // Extract video ID from various YouTube URL formats
+  try {
     if (url.contains('youtube.com/watch?v=')) {
-      videoId = Uri.parse(url).queryParameters['v'] ?? '';
+      final uri = Uri.parse(url);
+      videoId = uri.queryParameters['v'] ?? '';
     } else if (url.contains('youtu.be/')) {
       videoId = url.split('youtu.be/').last.split('?').first;
     } else if (url.contains('youtube.com/embed/')) {
       videoId = url.split('embed/').last.split('?').first;
     }
     
-    if (videoId.isEmpty) {
-      return Container(
-        height: 250,
-        decoration: BoxDecoration(
-          color: Colors.grey[300],
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: const Center(
-          child: Text('Invalid video URL'),
-        ),
-      );
+    // Clean video ID (remove any trailing parameters)
+    if (videoId.contains('&')) {
+      videoId = videoId.split('&').first;
     }
     
-    // Optimized embed URL with proper parameters
-    final embedUrl = 'https://www.youtube.com/embed/$videoId?'
-        'enablejsapi=1&'
-        'rel=0&'
-        'modestbranding=1&'
-        'playsinline=1&'
-        'fs=1&'
-        'iv_load_policy=3&'
-        'widget_referrer=app';
-
-    _webViewController = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(Colors.black)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onNavigationRequest: (request) {
-            // Only allow YouTube embed URLs
-            if (request.url.contains('youtube.com/embed/')) {
-              return NavigationDecision.navigate;
-            }
-            return NavigationDecision.prevent;
-          },
-          onPageFinished: (url) {
-            // Inject CSS to hide YouTube logo and improve viewing
-            _webViewController?.runJavaScript('''
-              var style = document.createElement('style');
-              style.innerHTML = 'body { margin: 0; overflow: hidden; } iframe { border: none; }';
-              document.head.appendChild(style);
-            ''');
-          },
-        ),
-      )
-      ..loadRequest(Uri.parse(embedUrl));
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text(
-              'Video Tutorial',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF1E88E5),
-              ),
-            ),
-            Row(
-              children: [
-                IconButton(
-                  icon: Icon(_showVideo ? Icons.visibility_off : Icons.visibility),
-                  onPressed: () => setState(() => _showVideo = !_showVideo),
-                  tooltip: _showVideo ? 'Hide Video' : 'Show Video',
-                ),
-                IconButton(
-                  icon: const Icon(Icons.refresh),
-                  onPressed: () => _webViewController?.reload(),
-                  tooltip: 'Reload Video',
-                ),
-              ],
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        if (_showVideo)
-          Container(
-            height: 250,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              color: Colors.black,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 8,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: WebViewWidget(controller: _webViewController!),
+    // Validate video ID format (11 characters, alphanumeric with - and _)
+    final videoIdRegex = RegExp(r'^[a-zA-Z0-9_-]{11}$');
+    if (!videoIdRegex.hasMatch(videoId)) {
+      videoId = '';
+    }
+  } catch (e) {
+    print('Error extracting video ID: $e');
+    videoId = '';
+  }
+  
+  // Show error for invalid videos
+  if (videoId.isEmpty) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.orange.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.orange.shade200),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.video_library, size: 48, color: Colors.orange),
+          const SizedBox(height: 12),
+          const Text(
+            'Video Not Available',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.orange,
             ),
           ),
-        if (_showVideo)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Row(
-              children: [
-                Icon(Icons.info_outline, size: 14, color: Colors.grey[600]),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    'Tap fullscreen for better viewing experience',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                      fontStyle: FontStyle.italic,
-                    ),
+          const SizedBox(height: 8),
+          Text(
+            'Unable to load video from URL',
+            style: TextStyle(color: Colors.grey[700]),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            onPressed: () async {
+              try {
+                await ApiService.refreshModuleVideos(widget.moduleId);
+                _loadModuleContent();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Videos refreshed!'),
+                    backgroundColor: Colors.green,
                   ),
-                ),
-              ],
+                );
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Failed to refresh: $e'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+            icon: const Icon(Icons.refresh),
+            label: const Text('Refresh Videos'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
             ),
           ),
-      ],
+        ],
+      ),
     );
   }
+  
+  // ✅ FIX: Create optimized embed URL (removed problematic parameters)
+  final embedUrl = 'https://www.youtube.com/embed/$videoId?'
+      'autoplay=0&'
+      'rel=0&'
+      'modestbranding=1&'
+      'playsinline=1';
+
+  // ✅ FIX: Simplified WebViewController without JavaScript injection
+  _webViewController = WebViewController()
+    ..setJavaScriptMode(JavaScriptMode.unrestricted)
+    ..setBackgroundColor(Colors.black)
+    ..setNavigationDelegate(
+      NavigationDelegate(
+        onNavigationRequest: (request) {
+          // Only allow YouTube embed URLs
+          if (request.url.contains('youtube.com/embed/') ||
+              request.url.contains('youtube.com') ||
+              request.url.contains('googlevideo.com')) {
+            return NavigationDecision.navigate;
+          }
+          return NavigationDecision.prevent;
+        },
+        onPageStarted: (url) {
+          print('🎥 Loading video: $url');
+        },
+        onPageFinished: (url) {
+          print('✅ Video loaded successfully');
+          // ✅ REMOVED: No JavaScript injection - this was causing the error
+        },
+        onWebResourceError: (error) {
+          print('❌ Video load error: ${error.description}');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Video failed to load. Try refreshing.'),
+                backgroundColor: Colors.orange,
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
+        },
+      ),
+    )
+    ..loadRequest(Uri.parse(embedUrl));
+
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text(
+            'Video Tutorial',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1E88E5),
+            ),
+          ),
+          Row(
+            children: [
+              IconButton(
+                icon: Icon(_showVideo ? Icons.visibility_off : Icons.visibility),
+                onPressed: () => setState(() => _showVideo = !_showVideo),
+                tooltip: _showVideo ? 'Hide Video' : 'Show Video',
+              ),
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                onPressed: () => _webViewController?.reload(),
+                tooltip: 'Reload Video',
+              ),
+            ],
+          ),
+        ],
+      ),
+      const SizedBox(height: 12),
+      if (_showVideo)
+        Container(
+          height: 250,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            color: Colors.black,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.2),
+                blurRadius: 8,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: WebViewWidget(controller: _webViewController!),
+          ),
+        ),
+      if (_showVideo)
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Row(
+            children: [
+              Icon(Icons.info_outline, size: 14, color: Colors.grey[600]),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  'Tap fullscreen icon in video for better viewing',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+    ],
+  );
+}
 
   Widget _buildAccessDenied() {
     return WillPopScope(
@@ -347,147 +436,212 @@ class _ModuleContentPageState extends State<ModuleContentPage> with SingleTicker
   }
 
   Widget _buildVideoTab() {
-    final resources = _moduleData!['resources'] as List<dynamic>;
-    final videoResource = resources.cast<Map<String, dynamic>>().firstWhere(
-      (resource) => resource['type'] == 'video' && resource['url'] != null,
-      orElse: () => <String, dynamic>{},
-    );
+  final resources = _moduleData!['resources'] as List<dynamic>;
+  
+  // Find first valid video resource
+  Map<String, dynamic>? videoResource;
+  for (var resource in resources) {
+    if (resource['type'] == 'video' && 
+        resource['url'] != null && 
+        resource['url'].toString().contains('youtube.com/watch?v=')) {
+      videoResource = resource as Map<String, dynamic>;
+      break;
+    }
+  }
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Card(
-            elevation: 2,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _moduleData!['module']['title'],
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF1E88E5),
+  return SingleChildScrollView(
+    padding: const EdgeInsets.all(16),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Module info card (same as before)
+        Card(
+          elevation: 2,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _moduleData!['module']['title'],
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1E88E5),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _moduleData!['module']['description'],
+                  style: const TextStyle(fontSize: 16, color: Colors.grey),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    const Icon(Icons.schedule, size: 16, color: Colors.grey),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${_moduleData!['module']['estimated_time']} min',
+                      style: const TextStyle(color: Colors.grey),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _moduleData!['module']['description'],
-                    style: const TextStyle(fontSize: 16, color: Colors.grey),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      const Icon(Icons.schedule, size: 16, color: Colors.grey),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${_moduleData!['module']['estimated_time']} min',
-                        style: const TextStyle(color: Colors.grey),
-                      ),
-                      const SizedBox(width: 16),
-                      Icon(
-                        _moduleData?['current_progress'] == 'completed'
-                            ? Icons.check_circle
-                            : Icons.circle_outlined,
-                        size: 16,
+                    const SizedBox(width: 16),
+                    Icon(
+                      _moduleData?['current_progress'] == 'completed'
+                          ? Icons.check_circle
+                          : Icons.circle_outlined,
+                      size: 16,
+                      color: _moduleData?['current_progress'] == 'completed'
+                          ? Colors.green
+                          : Colors.grey,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _moduleData?['current_progress'] == 'completed'
+                          ? 'Completed'
+                          : 'In Progress',
+                      style: TextStyle(
                         color: _moduleData?['current_progress'] == 'completed'
                             ? Colors.green
                             : Colors.grey,
                       ),
-                      const SizedBox(width: 4),
-                      Text(
-                        _moduleData?['current_progress'] == 'completed'
-                            ? 'Completed'
-                            : 'In Progress',
-                        style: TextStyle(
-                          color: _moduleData?['current_progress'] == 'completed'
-                              ? Colors.green
-                              : Colors.grey,
-                        ),
-                      ),
-                    ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // ✅ FIX: Better video handling
+        if (videoResource != null && videoResource['url'] != null)
+          _buildVideoPlayer(videoResource['url']!)
+        else
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.blue.shade50,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.blue.shade200),
+            ),
+            child: Column(
+              children: [
+                const Icon(Icons.ondemand_video, size: 48, color: Colors.blue),
+                const SizedBox(height: 12),
+                const Text(
+                  'No Video Available',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blue,
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Videos are being loaded for this module',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    try {
+                      await ApiService.refreshModuleVideos(widget.moduleId);
+                      _loadModuleContent();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Videos loaded!'),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                    } catch (e) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Failed: $e'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Load Videos'),
+                ),
+              ],
             ),
           ),
 
-          const SizedBox(height: 16),
-
-          if (videoResource.isNotEmpty && videoResource['url'] != null)
-            _buildVideoPlayer(videoResource['url']!),
-
-          if (resources.length > 1) ...[
-            const SizedBox(height: 24),
-            const Text(
-              'Additional Resources',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF1E88E5),
-              ),
+        // Additional resources section (same as before)
+        if (resources.where((r) => r['type'] != 'video').isNotEmpty) ...[
+          const SizedBox(height: 24),
+          const Text(
+            'Additional Resources',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1E88E5),
             ),
-            const SizedBox(height: 12),
-            ...resources.where((r) => r['type'] != 'video').map((resource) {
-              return Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
-                  leading: Icon(
-                    _getResourceIcon(resource['type']),
-                    color: const Color(0xFF1E88E5),
-                  ),
-                  title: Text(resource['title'] ?? 'Resource'),
-                  subtitle: Text('${resource['type']} • ${resource['difficulty'] ?? 'All levels'}'),
-                  trailing: const Icon(Icons.open_in_new, size: 16),
-                  onTap: () {},
+          ),
+          const SizedBox(height: 12),
+          ...resources.where((r) => r['type'] != 'video').map((resource) {
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                leading: Icon(
+                  _getResourceIcon(resource['type']),
+                  color: const Color(0xFF1E88E5),
                 ),
-              );
-            }),
-          ],
-
-          const SizedBox(height: 32),
-          if (_moduleData!['current_progress'] != 'completed')
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : _completeModule,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _isLoading ? Colors.grey : const Color(0xFF1E88E5),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: _isLoading
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                        ),
-                      )
-                    : const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.check_circle, size: 20),
-                          SizedBox(width: 8),
-                          Text(
-                            'Mark as Completed',
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                          ),
-                        ],
-                      ),
+                title: Text(resource['title'] ?? 'Resource'),
+                subtitle: Text('${resource['type']} • ${resource['difficulty'] ?? 'All levels'}'),
+                trailing: const Icon(Icons.open_in_new, size: 16),
+                onTap: () {},
               ),
-            ),
+            );
+          }),
         ],
-      ),
-    );
-  }
+
+        const SizedBox(height: 32),
+        // Complete button (same as before)
+        if (_moduleData!['current_progress'] != 'completed')
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton(
+              onPressed: _isLoading ? null : _completeModule,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _isLoading ? Colors.grey : const Color(0xFF1E88E5),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: _isLoading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.check_circle, size: 20),
+                        SizedBox(width: 8),
+                        Text(
+                          'Mark as Completed',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
 
   IconData _getResourceIcon(String? type) {
     switch (type) {
@@ -502,35 +656,42 @@ class _ModuleContentPageState extends State<ModuleContentPage> with SingleTicker
     }
   }
 
-  @override
+   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.moduleTitle),
-        backgroundColor: const Color(0xFF1E88E5),
-        foregroundColor: Colors.white,
-        bottom: _hasAccess ? TabBar(
-          controller: _tabController,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          tabs: const [
-            Tab(icon: Icon(Icons.play_circle_outline), text: 'Video'),
-            Tab(icon: Icon(Icons.auto_stories), text: 'Learn'),
-          ],
-        ) : null,
+    return WillPopScope(
+      // ✅ FIX: Handle back button to ensure refresh
+      onWillPop: () async {
+        widget.onModuleCompleted(); // Refresh parent on back
+        return true;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(widget.moduleTitle),
+          backgroundColor: const Color(0xFF1E88E5),
+          foregroundColor: Colors.white,
+          bottom: _hasAccess ? TabBar(
+            controller: _tabController,
+            indicatorColor: Colors.white,
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white70,
+            tabs: const [
+              Tab(icon: Icon(Icons.play_circle_outline), text: 'Video'),
+              Tab(icon: Icon(Icons.auto_stories), text: 'Learn'),
+            ],
+          ) : null,
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : !_hasAccess
+                ? _buildAccessDenied()
+                : TabBarView(
+                    controller: _tabController,
+                    children: [
+                      _buildVideoTab(),
+                      _buildEnhancedAIContentTab(),
+                    ],
+                  ),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : !_hasAccess
-              ? _buildAccessDenied()
-              : TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildVideoTab(),
-                    _buildEnhancedAIContentTab(),
-                  ],
-                ),
     );
   }
 

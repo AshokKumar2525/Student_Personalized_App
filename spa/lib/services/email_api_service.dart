@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 
 class EmailApiService {
-  static const String baseUrl = 'http://10.219.160.96:5000';
+  static const String baseUrl = 'http://10.140.91.96:5000';
 
   // Sync emails - ONLY last 5 days + important + starred
   static Future<Map<String, dynamic>> syncEmails({

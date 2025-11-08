@@ -222,7 +222,7 @@ class ApiService {
           ...assessmentData,
         }),
       ).timeout(
-        const Duration(seconds: 45),
+        const Duration(seconds: 60),
         onTimeout: () {
           throw Exception('Request timeout. Please try again.');
         },
@@ -321,7 +321,7 @@ class ApiService {
           'module_description=${Uri.encodeComponent(moduleDescription)}'
         ),
       ).timeout(
-        const Duration(seconds: 45),
+        const Duration(seconds: 60),
         onTimeout: () {
           throw Exception('AI content generation timeout');
         },
@@ -572,6 +572,32 @@ class ApiService {
       }
     } catch (e) {
       print('❌ [ERROR] Failed to connect Gmail: $e');
+      rethrow;
+    }
+  }
+   static Future<Map<String, dynamic>> refreshModuleVideos(int moduleId) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
+
+      print('🔄 Refreshing videos for module $moduleId...');
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/learning-path/refresh-videos/$moduleId'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'firebase_uid': user.uid,
+        }),
+      ).timeout(defaultTimeout);
+
+      if (response.statusCode == 200) {
+        print('✅ Videos refreshed successfully');
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Failed to refresh videos: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ Error refreshing videos: $e');
       rethrow;
     }
   }
