@@ -6,8 +6,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 class ApiService {
   static const String baseUrl = 'http://10.219.160.96:5000';
+  static const String phpBaseUrl = 'http://10.0.2.2/wtproject'; // ✅ Change for XAMPP
   static const Duration defaultTimeout = Duration(seconds: 30);
-  
+
   // In-memory cache for frequently accessed data
   static final Map<String, dynamic> _cache = {};
   static final Map<String, DateTime> _cacheTimestamps = {};
@@ -37,7 +38,7 @@ class ApiService {
     _clearCache('streak_$userId');
   }
 
-  // Auth Methods
+  // Existing Firebase sync methods (keep these)
   static Future<Map<String, dynamic>> syncUser({
     required String firebaseUid,
     required String email,
@@ -70,7 +71,7 @@ class ApiService {
       if (response.statusCode == 200 || response.statusCode == 201) {
         final responseData = jsonDecode(response.body);
         print('✅ [DEBUG] User synced successfully');
-        
+
         final User? user = FirebaseAuth.instance.currentUser;
         if (user != null && responseData['user'] != null) {
           final String? finalAvatarUrl = responseData['user']['avatar_url'];
@@ -79,7 +80,7 @@ class ApiService {
             print('✅ [DEBUG] Updated Firebase user photo URL');
           }
         }
-        
+
         return responseData;
       } else {
         print('❌ [DEBUG] Sync failed: ${response.statusCode}');
@@ -90,6 +91,45 @@ class ApiService {
       rethrow;
     }
   }
+
+  // ⚡️⚡️ ADD THIS NEW METHOD FOR PHP BACKEND INTEGRATION ⚡️⚡️
+  static Future<Map<String, dynamic>> syncUserToPhpBackend({
+    required String firebaseUid,
+    required String email,
+    required String fullName,
+    String? avatarUrl,
+  }) async {
+    try {
+      print('📤 [DEBUG] Syncing Firebase user with PHP backend...');
+
+      final response = await http.post(
+        Uri.parse('$phpBaseUrl/firebase_sync_user.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'firebase_uid': firebaseUid,
+          'email': email,
+          'full_name': fullName,
+          'avatar_url': avatarUrl ?? '',
+        }),
+      ).timeout(defaultTimeout);
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          print('✅ [DEBUG] PHP user sync success: ${data['status']}');
+          return data;
+        } else {
+          throw Exception('PHP backend error: ${data['message']}');
+        }
+      } else {
+        throw Exception('Failed: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ [ERROR] PHP sync failed: $e');
+      rethrow;
+    }
+  }
+
 
   static Future<Map<String, dynamic>> updateProfile({
     required String firebaseUid,
