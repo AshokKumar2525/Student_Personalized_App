@@ -12,8 +12,8 @@ import 'api_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'utils/avatar_utils.dart';
-import 'pages/forum/forum_page.dart';
-import 'package:flutter/material.dart';
+import 'pages/scholarship/scholarship_page.dart';
+import 'pages/finance_tracker/finance_home_screen.dart';
 import 'pages/forum/forum_page.dart';
 
 void main() async {
@@ -794,6 +794,7 @@ class FeaturesList extends StatelessWidget {
               child: const Icon(Icons.chevron_right_rounded, color: Color(0xFF1E88E5)),
             ),
             onTap: () {
+              // ✨ UPDATE THIS SECTION
               if (features[index] == "Tech Updates") {
                 Navigator.push(
                   context,
@@ -804,6 +805,16 @@ class FeaturesList extends StatelessWidget {
                   context,
                   MaterialPageRoute(builder: (context) => const LearningPathPage()),
                 );
+              } else if (features[index] == "Financial Expense Tracker") {  // ✨ ADD THIS
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const FinanceHomeScreen()),
+                );
+              }
+              else if (features[index] == "Scholarship Related") {  // ✨ ADD THIS
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const ScholarshipPage()),
               } else if (features[index] == "Important Email Summarizer") {
                 Navigator.push(
                   context,
