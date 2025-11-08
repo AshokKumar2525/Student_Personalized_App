@@ -5,8 +5,8 @@ import 'package:http_parser/http_parser.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class ApiService {
-  static const String baseUrl ='http://10.66.139.96:5000'; // Replace with your backend URL
-
+  static const String baseUrl ='http://10.178.192.5:5000';
+  
   // Add this method to ApiService class
 static Future<Map<String, dynamic>> syncUser({
   required String firebaseUid,
@@ -52,7 +52,7 @@ static Future<Map<String, dynamic>> syncUser({
       
       // Update Firebase user profile with the final avatar URL from backend
       final User? user = FirebaseAuth.instance.currentUser;
-      if (user != null && responseData['user'] != null) {
+      if (user != null && responseData['user'] != null){
         final String? finalAvatarUrl = responseData['user']['avatar_url'];
         if (finalAvatarUrl != null && finalAvatarUrl != user.photoURL) {
           await user.updatePhotoURL(finalAvatarUrl);
@@ -535,4 +535,133 @@ static Future<Map<String, dynamic>> generateLearningPath(Map<String, dynamic> as
       }
   }
 }
+
+// Add these methods to your existing ApiService class in api_service.dart
+
+// SCHOLARSHIP METHODS
+
+static Future<Map<String, dynamic>> saveScholarshipPreferences(Map<String, dynamic> preferences) async {
+  try {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/scholarships/preferences'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(preferences),
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to save preferences: ${response.statusCode} - ${response.body}');
+    }
+  } catch (e) {
+    throw Exception('Failed to save preferences: $e');
+  }
 }
+
+static Future<Map<String, dynamic>> getScholarshipPreferences(String firebaseUid) async {
+  try {
+    final response = await http.get(
+      Uri.parse('$baseUrl/api/scholarships/preferences/$firebaseUid'),
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to get preferences: ${response.statusCode} - ${response.body}');
+    }
+  } catch (e) {
+    throw Exception('Failed to get preferences: $e');
+  }
+}
+
+static Future<Map<String, dynamic>> searchScholarships(String firebaseUid) async {
+  try {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/scholarships/search'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'firebase_uid': firebaseUid}),
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to search scholarships: ${response.statusCode} - ${response.body}');
+    }
+  } catch (e) {
+    throw Exception('Failed to search scholarships: $e');
+  }
+}
+
+static Future<Map<String, dynamic>> saveScholarship(String firebaseUid, String scholarshipId) async {
+  try {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/scholarships/save'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'firebase_uid': firebaseUid,
+        'scholarship_id': scholarshipId,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to save scholarship: ${response.statusCode} - ${response.body}');
+    }
+  } catch (e) {
+    throw Exception('Failed to save scholarship: $e');
+  }
+}
+
+static Future<Map<String, dynamic>> unsaveScholarship(String firebaseUid, String scholarshipId) async {
+  try {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/scholarships/unsave'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'firebase_uid': firebaseUid,
+        'scholarship_id': scholarshipId,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to unsave scholarship: ${response.statusCode} - ${response.body}');
+    }
+  } catch (e) {
+    throw Exception('Failed to unsave scholarship: $e');
+  }
+}
+
+static Future<Map<String, dynamic>> getSavedScholarships(String firebaseUid) async {
+  try {
+    final response = await http.get(
+      Uri.parse('$baseUrl/api/scholarships/saved/$firebaseUid'),
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to get saved scholarships: ${response.statusCode} - ${response.body}');
+    }
+  } catch (e) {
+    throw Exception('Failed to get saved scholarships: $e');
+  }
+}
+
+static Future<Map<String, dynamic>> getScholarshipDetails(String scholarshipId) async {
+  try {
+    final response = await http.get(
+      Uri.parse('$baseUrl/api/scholarships/$scholarshipId'),
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to get scholarship details: ${response.statusCode} - ${response.body}');
+    }
+  } catch (e) {
+    throw Exception('Failed to get scholarship details: $e');
+  }
+}}

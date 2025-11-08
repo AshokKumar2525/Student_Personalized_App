@@ -11,6 +11,8 @@ import 'api_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'utils/avatar_utils.dart';
+import 'pages/scholarship/scholarship_page.dart';
+import 'pages/finance_tracker/finance_home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -708,14 +710,10 @@ class FeaturesList extends StatelessWidget {
   final List<String> features = const [
     "Tech Updates",
     "Learning Path Finder",
-    "Body Fitness",
     "Academic Performance",
-    "Medicine Related",
-    "English Communication",
     "Scholarship Related",
     "Important Email Summarizer",
     "Financial Expense Tracker",
-    "Discover",
   ];
 
   @override
@@ -763,15 +761,27 @@ class FeaturesList extends StatelessWidget {
               child: const Icon(Icons.chevron_right_rounded, color: Color(0xFF1E88E5)),
             ),
             onTap: () {
+              // ✨ UPDATE THIS SECTION
               if (features[index] == "Tech Updates") {
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (context) => const TechUpdatesPage()),
                 );
-              }else if (features[index] == "Learning Path Finder") {
+              } else if (features[index] == "Learning Path Finder") {
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (context) => const LearningPathPage()),
+                );
+              } else if (features[index] == "Financial Expense Tracker") {  // ✨ ADD THIS
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const FinanceHomeScreen()),
+                );
+              }
+              else if (features[index] == "Scholarship Related") {  // ✨ ADD THIS
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const ScholarshipPage()),
                 );
               }
               // Add other feature navigations here

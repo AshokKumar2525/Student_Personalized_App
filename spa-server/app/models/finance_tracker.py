@@ -1,66 +1,65 @@
+# spa-server/app/models/finance_tracker.py
+
+from sqlalchemy import Index
 from app import db
 from datetime import datetime
-from sqlalchemy import String, Integer, DateTime, ForeignKey, Boolean, Float, Text, CheckConstraint, Index
 
-# ======================
-# FINANCE TRACKER TABLES (3 tables)
-# ======================
-
-class Transaction(db.Model):
-    """Stores all income and expense records"""
-    __tablename__ = 'transactions'
-    __table_args__ = (
-        CheckConstraint('type IN (\'income\', \'expense\')', name='check_transaction_type'),
-        CheckConstraint('account IN (\'cash\', \'card\', \'savings\')', name='check_transaction_account'),
-        CheckConstraint('amount >= 0', name='check_transaction_amount_positive'),
-        Index('idx_transaction_user', 'user_id'),
-        Index('idx_transaction_date', 'date'),
-        Index('idx_transaction_type', 'type')
-    )
-
-    id = db.Column(Integer, primary_key=True)
-    user_id = db.Column(String(36), ForeignKey('users.id'), nullable=False, index=True)
-    title = db.Column(String(100), nullable=False)
-    amount = db.Column(Float, nullable=False)
-    type = db.Column(String(10), nullable=False)  # 'income' or 'expense'
-    category = db.Column(String(50))
-    account = db.Column(String(10), nullable=False)  # 'cash', 'card', or 'savings'
-    date = db.Column(DateTime, nullable=False)
-    notes = db.Column(Text)
-    created_at = db.Column(DateTime, default=datetime.utcnow)
-    updated_at = db.Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    # Relationships
-    user = db.relationship('User', back_populates='transactions')
-
+# ----------------------
+# Budget Model
+# ----------------------
 class Budget(db.Model):
-    """Stores the monthly budget for the user"""
+    """Stores the monthly budget for categories"""
     __tablename__ = 'budgets'
     __table_args__ = (
-        Index('idx_budget_user_month', 'user_id', 'month'),
+        Index('idx_budget_user_month_category', 'user_id', 'month', 'category'),
     )
 
-    id = db.Column(Integer, primary_key=True)
-    user_id = db.Column(String(36), ForeignKey('users.id'), nullable=False, index=True)
-    month = db.Column(String(7), nullable=False)  # Format: YYYY-MM
-    amount = db.Column(Float, nullable=False)
-    created_at = db.Column(DateTime, default=datetime.utcnow)
-    updated_at = db.Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False, index=True)
+    category = db.Column(db.String(50), nullable=False)  # Add this field
+    month = db.Column(db.String(7), nullable=False)  # Format: YYYY-MM
+    amount = db.Column(db.Float, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     user = db.relationship('User', back_populates='budgets')
 
-class FinanceSetting(db.Model):
-    """Stores finance-related app settings"""
-    __tablename__ = 'finance_settings'
 
-    id = db.Column(Integer, primary_key=True)
-    user_id = db.Column(String(36), ForeignKey('users.id'), nullable=False, unique=True, index=True)
-    currency = db.Column(String(3), default='INR')
-    default_account = db.Column(String(10), default='cash')  # 'cash', 'card', or 'savings'
-    budget_notifications = db.Column(Boolean, default=True)
-    created_at = db.Column(DateTime, default=datetime.utcnow)
-    updated_at = db.Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+# ----------------------
+# Transaction Model
+# ----------------------
+class Transaction(db.Model):
+    """Stores individual financial transactions"""
+    __tablename__ = 'transactions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    budget_id = db.Column(db.Integer, db.ForeignKey('budgets.id'), nullable=False, index=True)
+    amount = db.Column(db.Float, nullable=False)
+    description = db.Column(db.String(200))
+    date = db.Column(db.DateTime, default=datetime.utcnow)
 
     # Relationships
-    user = db.relationship('User', back_populates='settings')
+    budget = db.relationship('Budget', back_populates='transactions')
+
+
+# Add back-populates in Budget
+Budget.transactions = db.relationship('Transaction', back_populates='budget', cascade='all, delete-orphan')
+
+
+# ----------------------
+# FinanceSetting Model
+# ----------------------
+class FinanceSetting(db.Model):
+    """Stores user-specific finance settings"""
+    __tablename__ = 'finance_settings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False, unique=True)
+    currency = db.Column(db.String(10), default='INR')  # Default currency
+    notifications_enabled = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    user = db.relationship('User', back_populates='finance_settings')
